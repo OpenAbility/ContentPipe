@@ -38,21 +38,25 @@ public struct ContentDirectory
 		}
 
 		byte[] compressedData = MessagePackSerializer.Serialize(data.ToArray());
-		
-		
-		DeflateStream gZipStream = new DeflateStream(File.Open(filePath, FileMode.OpenOrCreate), CompressionLevel.SmallestSize, false);
+
+		FileStream fileStream = File.Open(filePath, FileMode.OpenOrCreate);
+		DeflateStream gZipStream = new DeflateStream(fileStream, CompressionLevel.SmallestSize, false);
 		gZipStream.Write(compressedData);
 		gZipStream.Close();
+		fileStream.Close();
 
 	}
 
 	public ContentDirectory(string path)
 	{
 
-		DeflateStream gZipStream = new DeflateStream(File.Open(path + ".cpkg", FileMode.Open), CompressionMode.Decompress, false);
+		FileStream fileStream = File.Open(path + ".cpkg", FileMode.Open);
+		DeflateStream gZipStream = new DeflateStream(fileStream, CompressionMode.Decompress, false);
 
 		MemoryStream memoryStream = new MemoryStream();
 		gZipStream.CopyTo(memoryStream);
+		gZipStream.Close();
+		fileStream.Close();
 
 		ContentLump[] data = MessagePackSerializer.Deserialize<ContentLump[]>(memoryStream.ToArray());
 

@@ -19,6 +19,12 @@ public static class Content
 		if (Directories.ContainsKey(path))
 			Directories.Remove(path);
 	}
+
+	public static void UnloadAll()
+	{
+		Directories.Clear();
+		PhysicalDirectories.Clear();
+	}
 	
 	public static void LoadPhysicalDirectory(string path)
 	{
