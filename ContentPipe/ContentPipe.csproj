@@ -4,6 +4,19 @@
         <TargetFramework>net7.0</TargetFramework>
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
+        <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+        <Title>ContentPipe</Title>
+        <Authors>OpenAbility</Authors>
+        <Description>ContentPipe is a very basic content loading pipeline designed for game assets.</Description>
+        <Copyright>2023</Copyright>
+        <PackageProjectUrl>https://github.com/OpenAbility/ContentPipe</PackageProjectUrl>
+        <PackageLicenseUrl>https://github.com/OpenAbility/ContentPipe/blob/main/LICENSE</PackageLicenseUrl>
+        <RepositoryUrl>https://github.com/OpenAbility/ContentPipe</RepositoryUrl>
+        <RepositoryType>git</RepositoryType>
+        <PackageTags>Content, Game, Lightweight</PackageTags>
+        <Company>OpenAbility</Company>
+        <AssemblyVersion>1.0.0</AssemblyVersion>
+        <FileVersion>1.0.0</FileVersion>
     </PropertyGroup>
 
     <ItemGroup>
