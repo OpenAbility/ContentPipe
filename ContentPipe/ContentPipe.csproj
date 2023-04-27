@@ -10,9 +10,9 @@
         <Company>OpenAbility</Company>
         <Product>ContentPipe</Product>
         <ProductName>ContentPipe</ProductName>
-        <ProductVersion>1.0.0</ProductVersion>
+        <ProductVersion>1.0.1</ProductVersion>
         <Authors>khhs</Authors>
-        <PackageVersion>1.0.0</PackageVersion>
+        <PackageVersion>1.0.1</PackageVersion>
         
         <Description>
             ContentPipe is a basic content pipeline made for a private game engine
