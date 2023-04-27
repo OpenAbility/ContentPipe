@@ -7,28 +7,27 @@ namespace ContentPipe;
 /// </summary>
 public static class Content
 {
-	private static readonly Dictionary<string, ContentDirectory> Directories = new Dictionary<string, ContentDirectory>();
-	private static readonly List<string> PhysicalDirectories = new List<string>();
-	
+	private static readonly Dictionary<string, IContentProvider> Providers = new Dictionary<string, IContentProvider>();
+
 	/// <summary>
 	/// Load a packed content directory(.cpkg file)
 	/// </summary>
 	/// <param name="path">The path to the directory without extension</param>
 	public static void LoadDirectory(string path)
 	{
-		if(Directories.ContainsKey(path))
+		if(Providers.ContainsKey(path))
 			return;
-		Directories.Add(path, new ContentDirectory(path));
+		Providers.Add(path, new PacketContentProvider(new ContentDirectory(path)));
 	}
 	
 	/// <summary>
 	/// Unload a packed content directory
 	/// </summary>
 	/// <param name="path">The same as you used when you loaded it(path without extension)</param>
-	public static void UnloadDirectory(string path)
+	public static void Unload(string path)
 	{
-		if (Directories.ContainsKey(path))
-			Directories.Remove(path);
+		if (Providers.ContainsKey(path))
+			Providers.Remove(path);
 	}
 	
 	/// <summary>
@@ -36,8 +35,7 @@ public static class Content
 	/// </summary>
 	public static void UnloadAll()
 	{
-		Directories.Clear();
-		PhysicalDirectories.Clear();
+		Providers.Clear();
 	}
 	
 	/// <summary>
@@ -46,54 +44,48 @@ public static class Content
 	/// <param name="path">The path to the directory</param>
 	public static void LoadPhysicalDirectory(string path)
 	{
-		if(PhysicalDirectories.Contains(path))
+		if(Providers.ContainsKey(path))
 			return;
 		if(!Directory.Exists(path))
 			return;
 		
-		PhysicalDirectories.Add(path);
+		Providers.Add(path, new PhysicalContentProvider(path));
 	}
-	
-	/// <summary>
-	/// Unload a physical directory
-	/// </summary>
-	/// <param name="path">The path to the directory</param>
-	public static void UnloadPhysicalDirectory(string path)
-	{
-		if (PhysicalDirectories.Contains(path))
-			PhysicalDirectories.Remove(path);
-	}
-	
+
 	/// <summary>
 	/// Load/Fetch a content lump from loaded directories. Newer loaded directories are fetched from before other directories
-	/// <remarks>Physical directories will always be loaded from before packed directories</remarks>
 	/// </summary>
 	/// <param name="resource">The resource path to load, relative to the directory</param>
 	/// <returns>The content lump loaded, or null if it is not available</returns>
 	public static ContentLump? Load(string resource)
 	{
-
-		foreach (var directory in PhysicalDirectories)
+		foreach (var provider in Providers.Values)
 		{
-			string path = Path.Combine(directory, resource);
-			if (File.Exists(path))
-			{
-				return new ContentLump()
-				{
-					Data = File.ReadAllBytes(path),
-					Name = resource
-				};
-			}
-		}
-		
-		foreach (var directory in Directories.Values.Reverse())
-		{
-			ContentLump? lump = directory[resource];
+			ContentLump? lump = provider.Load(resource);
 
 			if (lump != null)
 				return lump;
 		}
 		return null;
+	}
+	
+	/// <summary>
+	/// Load/Fetch a content lump from all loaded directories. Newer loaded directories are fetched from before other directories
+	/// </summary>
+	/// <param name="resource">The resource path to load, relative to the directory</param>
+	/// <returns>The content lumps loaded</returns>
+	public static ContentLump[] LoadAll(string resource)
+	{
+		List<ContentLump> contentLumps = new List<ContentLump>();
+		foreach (var provider in Providers.Values.Reverse())
+		{
+			ContentLump? lump = provider.Load(resource);
+
+			if (lump != null)
+				contentLumps.Add(lump.Value);
+		}
+		
+		return contentLumps.ToArray();
 	}
 
 	/// <summary>
@@ -130,5 +122,60 @@ public static class Content
 	public static Stream LoadStream(string resource)
 	{
 		return new MemoryStream(LoadBytes(resource));
+	}
+	
+	/// <summary>
+	/// Load all bytes available for a resource
+	/// </summary>
+	/// <param name="resource">The resource path to load, relative to the directory</param>
+	/// <returns>The stream to load, as a MemoryStream, points towards the binary data, or an empty byte array if it is not available</returns>
+	public static byte[][] LoadAllBytes(string resource)
+	{
+		List<byte[]> data = new List<byte[]>();
+		ContentLump[] lumps = LoadAll(resource);
+
+		foreach (var lump in lumps)
+		{
+			data.Add(lump.Data);
+		}
+
+		return data.ToArray();
+	}
+	
+	/// <summary>
+	/// Read all streams available for a resource
+	/// </summary>
+	/// <param name="resource">The resource path to load, relative to the directory</param>
+	/// <returns>The stream to load, as a MemoryStream, points towards the binary data, or an empty byte array if it is not available</returns>
+	public static Stream[] LoadAllStreams(string resource)
+	{
+		var allBytes = LoadAllBytes(resource);
+		List<Stream> streams = new List<Stream>();
+		
+		foreach (var lump in allBytes)
+		{
+			streams.Add(new MemoryStream(lump));
+		}
+
+		return streams.ToArray();
+	}
+	
+		
+	/// <summary>
+	/// Read all strings available for a resource
+	/// </summary>
+	/// <param name="resource">The resource path to load, relative to the directory</param>
+	/// <returns>The stream to load, as a MemoryStream, points towards the binary data, or an empty byte array if it is not available</returns>
+	public static string[] LoadAllStrings(string resource)
+	{
+		var allBytes = LoadAllBytes(resource);
+		List<string> strings = new List<string>();
+		
+		foreach (var lump in allBytes)
+		{
+			strings.Add(Encoding.UTF8.GetString(lump));
+		}
+
+		return strings.ToArray();
 	}
 }
