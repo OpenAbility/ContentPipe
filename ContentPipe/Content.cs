@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.RegularExpressions;
 
 namespace ContentPipe;
 
@@ -8,6 +9,19 @@ namespace ContentPipe;
 public static class Content
 {
 	private static readonly Dictionary<string, IContentProvider> Providers = new Dictionary<string, IContentProvider>();
+	
+	private static readonly Dictionary<string, int> LoadedContent = new Dictionary<string, int>();
+	
+	/// <summary>
+	/// If Loads should be logged. This will slow down performance of loading by some amount!
+	/// </summary>
+	public static bool ShouldLogLoads = false;
+	
+	/// <summary>
+	/// A filter to run on all log load registrations, in case you want to ignore something.
+	/// This only affects the output log!
+	/// </summary>
+	public static Regex LogLoadIgnoreFilter = new Regex("");
 
 	/// <summary>
 	/// Load a packed content directory(.cpkg file)
@@ -18,6 +32,20 @@ public static class Content
 		if(Providers.ContainsKey(path))
 			return;
 		Providers.Add(path, new PacketContentProvider(new ContentDirectory(path)));
+	}
+	
+	/// <summary>
+	/// Load a packed ContentDirectory where all content has a prefix.
+	/// </summary>
+	/// <param name="path">The path to the cpkg directory, without extension</param>
+	/// <param name="prefix">The prefix to be used for said directory</param>
+	/// <returns>The string to be used when unloading, as prefixing slightly modifies the string</returns>
+	public static string LoadPrefixed(string path, string prefix)
+	{
+		string pfxPath = prefix + path;
+		if(!Providers.ContainsKey(pfxPath))
+			Providers.Add(pfxPath, new PrefixedContentProvider(prefix, new PacketContentProvider(new ContentDirectory(path))));
+		return pfxPath;
 	}
 	
 	/// <summary>
@@ -52,6 +80,14 @@ public static class Content
 		Providers.Add(path, new PhysicalContentProvider(path));
 	}
 
+	private static void RegisterLoad(string resource)
+	{
+		if(!ShouldLogLoads)
+			return;
+		LoadedContent.TryAdd(resource, 0);
+		LoadedContent[resource]++;
+	}
+
 	/// <summary>
 	/// Load/Fetch a content lump from loaded directories. Newer loaded directories are fetched from before other directories
 	/// </summary>
@@ -59,6 +95,7 @@ public static class Content
 	/// <returns>The content lump loaded, or null if it is not available</returns>
 	public static ContentLump? Load(string resource)
 	{
+		RegisterLoad(resource);
 		foreach (var provider in Providers.Values)
 		{
 			ContentLump? lump = provider.Load(resource);
@@ -68,7 +105,7 @@ public static class Content
 		}
 		return null;
 	}
-	
+
 	/// <summary>
 	/// Load/Fetch a content lump from all loaded directories. Newer loaded directories are fetched from before other directories
 	/// </summary>
@@ -76,6 +113,7 @@ public static class Content
 	/// <returns>The content lumps loaded</returns>
 	public static ContentLump[] LoadAll(string resource)
 	{
+		RegisterLoad(resource);
 		List<ContentLump> contentLumps = new List<ContentLump>();
 		foreach (var provider in Providers.Values.Reverse())
 		{
@@ -177,5 +215,36 @@ public static class Content
 		}
 
 		return strings.ToArray();
+	}
+	
+	/// <summary>
+	/// Get the load log if one is collected, formatted as CSV
+	/// </summary>
+	/// <returns>The load log</returns>
+	public static string WriteLoadLog(bool includeDeadResources = false)
+	{
+		StringWriter stringWriter = new StringWriter();
+		stringWriter.WriteLine("File,Loads");
+
+		if (includeDeadResources)
+		{
+			foreach (var provider in Providers)
+			{
+				string[] resources = provider.Value.GetContent();
+				foreach (var res in resources)
+				{
+					if(!String.IsNullOrWhiteSpace(res))
+						LoadedContent.TryAdd(res, 0);
+				}
+			}
+		}
+		var lc = LoadedContent.OrderByDescending(l => l.Value);
+		foreach (var load in lc)
+		{
+			if(!LogLoadIgnoreFilter.IsMatch(load.Key))
+				stringWriter.WriteLine(load.Key + "," + load.Value);
+		}
+		
+		return stringWriter.ToString();
 	}
 }
