@@ -72,7 +72,7 @@ internal readonly struct PhysicalContentProvider : IContentProvider
 		{
 			return new ContentLump()
 			{
-				Data = File.ReadAllBytes(path), Name = name
+				Stream = File.OpenRead(path), Name = name
 			};
 		}
 		return null;

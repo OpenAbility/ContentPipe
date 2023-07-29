@@ -49,6 +49,20 @@ public static class Content
 	}
 	
 	/// <summary>
+	/// Load a packed ContentDirectory where all content has a prefix.
+	/// </summary>
+	/// <param name="path">The path to the physical directory</param>
+	/// <param name="prefix">The prefix to be used for said directory</param>
+	/// <returns>The string to be used when unloading, as prefixing slightly modifies the string</returns>
+	public static string LoadPhysPrefixed(string path, string prefix)
+	{
+		string pfxPath = prefix + path;
+		if(!Providers.ContainsKey(pfxPath))
+			Providers.Add(pfxPath, new PrefixedContentProvider(prefix, new PhysicalContentProvider(path)));
+		return pfxPath;
+	}
+	
+	/// <summary>
 	/// Unload a packed content directory
 	/// </summary>
 	/// <param name="path">The same as you used when you loaded it(path without extension)</param>
@@ -127,18 +141,35 @@ public static class Content
 	}
 
 	/// <summary>
-	/// Read the binary data from a resource. This is simply a wrapper for
-	/// <code>
-	/// Content.Load(resource).Data
-	/// </code>
+	/// Read the binary data from a resource.
 	/// </summary>
 	/// <param name="resource">The resource path to load, relative to the directory</param>
 	/// <returns>The binary data loaded, or an empty byte array if resource isn't available</returns>
 	public static byte[] LoadBytes(string resource)
 	{
-		ContentLump? lump = Load(resource);
+		return LoadBytes(Load(resource));
+	}
+	/// <summary>
+	/// Read the binary data from a lump
+	/// </summary>
+	/// <param name="lump">The lump to load from</param>
+	/// <returns>The binary data loaded, or an empty byte array if none is available</returns>
+	public static byte[] LoadBytes(ContentLump? lump)
+	{
 		if (lump == null)
 			return Array.Empty<byte>();
+		if (lump.Value.Data == null)
+		{
+			if(lump.Value.Stream == null)
+				return Array.Empty<byte>();
+
+			byte[] readBuffer = new byte[lump.Value.Stream.Length];
+			if (lump.Value.Stream.Read(readBuffer) != readBuffer.Length)
+			{
+				
+			}
+			return readBuffer;
+		}
 		return lump.Value.Data;
 	}
 	
@@ -153,13 +184,40 @@ public static class Content
 	}
 	
 	/// <summary>
+	/// Read a string from a lump
+	/// </summary>
+	/// <param name="lump">The lump to read from</param>
+	/// <returns>The string loaded, or an empty string if no data was found</returns>
+	public static string LoadString(ContentLump? lump)
+	{
+		return Encoding.UTF8.GetString(LoadBytes(lump));
+	}
+	
+	/// <summary>
 	/// Read a stream from a resource
 	/// </summary>
 	/// <param name="resource">The resource path to load, relative to the directory</param>
 	/// <returns>The stream to load, as a MemoryStream, points towards the binary data, or an empty byte array if it is not available</returns>
 	public static Stream LoadStream(string resource)
 	{
-		return new MemoryStream(LoadBytes(resource));
+		return LoadStream(Load(resource));
+	}
+
+	/// <summary>
+	/// Read a stream from a lump
+	/// </summary>
+	/// <param name="lump">The lump to read from</param>
+	/// <returns>The stream, or Stream.Null if no data could be loaded from the lump</returns>
+	public static Stream LoadStream(ContentLump? lump)
+	{
+		if(lump == null)
+			return Stream.Null;
+		
+		if (lump.Value.Stream == null)
+		{
+			return lump.Value.Data == null ? Stream.Null : new MemoryStream(lump.Value.Data);
+		}
+		return lump.Value.Stream;
 	}
 	
 	/// <summary>
@@ -174,7 +232,7 @@ public static class Content
 
 		foreach (var lump in lumps)
 		{
-			data.Add(lump.Data);
+			data.Add(LoadBytes(lump));
 		}
 
 		return data.ToArray();
@@ -187,12 +245,12 @@ public static class Content
 	/// <returns>The stream to load, as a MemoryStream, points towards the binary data, or an empty byte array if it is not available</returns>
 	public static Stream[] LoadAllStreams(string resource)
 	{
-		var allBytes = LoadAllBytes(resource);
+		var allBytes = LoadAll(resource);
 		List<Stream> streams = new List<Stream>();
 		
 		foreach (var lump in allBytes)
 		{
-			streams.Add(new MemoryStream(lump));
+			streams.Add(LoadStream(lump));
 		}
 
 		return streams.ToArray();
@@ -206,12 +264,12 @@ public static class Content
 	/// <returns>The stream to load, as a MemoryStream, points towards the binary data, or an empty byte array if it is not available</returns>
 	public static string[] LoadAllStrings(string resource)
 	{
-		var allBytes = LoadAllBytes(resource);
+		var allBytes = LoadAll(resource);
 		List<string> strings = new List<string>();
 		
 		foreach (var lump in allBytes)
 		{
-			strings.Add(Encoding.UTF8.GetString(lump));
+			strings.Add(LoadString(lump));
 		}
 
 		return strings.ToArray();

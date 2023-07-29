@@ -83,7 +83,12 @@ public struct ContentLump
 	/// <summary>
 	/// The data of the ContentLump
 	/// </summary>
-	public byte[] Data = Array.Empty<byte>();
+	public byte[]? Data;
+	
+	/// <summary>
+	/// The stream to the data of the lump
+	/// </summary>
+	public Stream? Stream;
 
 	/// <summary>
 	/// Create a content lump with 0:ed fields.
