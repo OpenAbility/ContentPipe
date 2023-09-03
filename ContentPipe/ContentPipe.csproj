@@ -30,11 +30,5 @@
     <ItemGroup>
         <None Include="../README.md" Pack="true" PackagePath="\" />
     </ItemGroup>
-    
-    
-
-    <ItemGroup>
-      <PackageReference Include="MessagePack" Version="2.4.59" />
-    </ItemGroup>
 
 </Project>

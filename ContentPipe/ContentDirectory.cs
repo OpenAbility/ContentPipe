@@ -1,5 +1,4 @@
-﻿using MessagePack;
-using System.IO.Compression;
+﻿using System.IO.Compression;
 
 namespace ContentPipe;
 
@@ -72,7 +71,6 @@ public struct ContentDirectory
 /// <summary>
 /// A content lump, or in other words, a named byte array. Used to store data in a cpkg file.
 /// </summary>
-[MessagePackObject]
 public struct ContentLump
 {
 	/// <summary>
