@@ -22,15 +22,11 @@ public struct ContentDirectory
 			if (entry == null)
 				return null;
 			
-			string tempFile = Directory.GetCurrentDirectory() + "/temp-read";
-			
-			entry.ExtractToFile(tempFile);
 			ContentLump contentLump = new()
 			{
 				Name = name,
-				Data = File.ReadAllBytes(tempFile)
+				Stream = new ContentStream(entry.Length, entry.Open())
 			};
-			File.Delete(tempFile);
 
 			return contentLump;
 		}
