@@ -1,3 +1,5 @@
+using System.Text;
+
 namespace ContentPipe;
 
 internal interface IContentProvider
@@ -36,6 +38,37 @@ internal readonly struct PrefixedContentProvider : IContentProvider
 		return content;
 	}
 	
+}
+
+internal readonly struct CDirContentProvider : IContentProvider
+{
+	private readonly CDIRFile directory;
+	
+	public CDirContentProvider(CDIRFile directory)
+	{
+		this.directory = directory;
+	}
+
+	public ContentLump? Load(string name)
+	{
+		CDirReadHandle? handle = directory.ReadFile(name);
+		if (handle == null)
+			return null;
+
+		// TODO: Wrap stuff instead!
+		return new ContentLump
+		{
+			Data = handle.Read()
+		};
+	}
+	public string[] GetContent()
+	{
+		CDirReadHandle? handle = directory.ReadFile("__content_listing");
+		if (handle == null)
+			return Array.Empty<string>();
+
+		return Encoding.Default.GetString(handle.Read()).Split("\n");
+	}
 }
 
 internal readonly struct PacketContentProvider : IContentProvider

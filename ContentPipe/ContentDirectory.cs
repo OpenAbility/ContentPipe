@@ -43,7 +43,40 @@ public struct ContentDirectory
 	{
 		if(File.Exists(path + ".cpkg"))
 			File.Delete(path + ".cpkg");
-		ZipFile.CreateFromDirectory(path, path + ".cpkg");
+
+		FileStream fileStream = File.OpenWrite(path + ".cpkg");
+		ZipArchive archive = new ZipArchive(fileStream, ZipArchiveMode.Create);
+		
+		PushFiles(path, path, ref archive, new Stack<PackIgnore>());
+
+		archive.Comment = "Built automatically by CompressDirectory";
+		archive.Dispose();
+		fileStream.Close();
+	}
+
+	private static void PushFiles(string root, string path, ref ZipArchive archive, Stack<PackIgnore> ignores)
+	{
+		string[] files = Directory.GetFiles(path);
+
+		// packignores are wonderful files.
+		string ignorePath = Path.Combine(path, ".packignore");
+		if (File.Exists(ignorePath))
+		{
+			ignores.Push(new PackIgnore(File.ReadAllText(ignorePath), path));
+		}
+
+		foreach (var file in files)
+		{
+			if(ignores.Any(i => i.Disallows(file)))
+				continue;
+			archive.CreateEntryFromFile(file, Path.GetRelativePath(root, file));
+		}
+
+		string[] dirs = Directory.GetDirectories(path);
+		foreach (var directory in dirs)
+		{
+			PushFiles(root, directory, ref archive, ignores);
+		}
 	}
 
 	/// <summary>

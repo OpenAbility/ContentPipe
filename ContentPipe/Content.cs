@@ -94,6 +94,20 @@ public static class Content
 		Providers.Add(path, new PhysicalContentProvider(path));
 	}
 
+	public static void LoadContentDirectory(string path)
+	{
+		if(Providers.ContainsKey(path))
+			return;
+		Providers.Add(path, new CDirContentProvider(new CDIRFile(path)));
+	}
+	
+	public static void LoadContentDirectoryPrefixed(string path, string prefix)
+	{
+		if(Providers.ContainsKey(path))
+			return;
+		Providers.Add(path, new PrefixedContentProvider(prefix, new CDirContentProvider(new CDIRFile(path))));
+	}
+
 	private static void RegisterLoad(string resource)
 	{
 		if(!ShouldLogLoads)

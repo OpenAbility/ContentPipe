@@ -19,16 +19,11 @@
         </Description>
         
         <PackageLicenseExpression>MIT</PackageLicenseExpression>
-        <PackageReadmeFile>README.md</PackageReadmeFile>
         
         <PackageProjectUrl>https://github.com/OpenAbility/ContentPipe</PackageProjectUrl>
         <RepositoryType>git</RepositoryType>
         <RepositoryUrl>https://github.com/OpenAbility/ContentPipe.git</RepositoryUrl>
         <Copyright>OpenAbility 2023</Copyright>
     </PropertyGroup>
-
-    <ItemGroup>
-        <None Include="../README.md" Pack="true" PackagePath="\" />
-    </ItemGroup>
 
 </Project>
