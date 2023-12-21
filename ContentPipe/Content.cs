@@ -319,4 +319,20 @@ public static class Content
 		
 		return stringWriter.ToString();
 	}
+	
+	/// <summary>
+	/// Get all content, including duplicates
+	/// </summary>
+	/// <returns>An enumerable returning each file available, including duplicates.</returns>
+	public static IEnumerable<string> GetAllContent()
+	{
+		foreach (var provider in Providers)
+		{
+			string[] cont = provider.Value.GetContent();
+			foreach (var v in cont)
+			{
+				yield return v;
+			}
+		}
+	}
 }
