@@ -137,7 +137,7 @@ public class CDIRFile
 		string temp = "__content_listing";
 		if (listing)
 		{
-			File.WriteAllLines(temp, files.Select(f => f.Value));
+			File.WriteAllText(temp, String.Join("|", files.Select(f => f.Value)));
 			files.Add(new KeyValuePair<string, string>(temp, temp));
 		}
 

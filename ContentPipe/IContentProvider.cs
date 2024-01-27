@@ -67,7 +67,7 @@ internal readonly struct CDirContentProvider : IContentProvider
 		if (handle == null)
 			return Array.Empty<string>();
 
-		return Encoding.Default.GetString(handle.Read()).Split("\n");
+		return Encoding.Default.GetString(handle.Read()).Split("|");
 	}
 }
 
