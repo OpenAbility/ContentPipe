@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Text;
 
 using FilePair = System.Collections.Generic.KeyValuePair<string, string>;
@@ -150,21 +151,36 @@ public class CDIRFile
 		offsets.Add(0);
 		BinaryWriter currentPartWriter = new BinaryWriter(File.OpenWrite(output + "_0"), Encoding.ASCII, false);
 		currentPartWriter.Write("CSEG".ToCharArray());
+
+		byte[] packBuffer = ArrayPool<byte>.Shared.Rent(1024);
 		foreach (FilePair file in files)
 		{
 			// Ugly hack
 			uint hash = Hash(file.Value);
-			byte[] data = File.ReadAllBytes(file.Key);
+
+			FileStream fileStream = File.OpenRead(file.Key);
+			long length = fileStream.Length;
+			// If it's too big we have to reallocate
+			if (packBuffer.Length < fileStream.Length)
+			{
+				ArrayPool<byte>.Shared.Return(packBuffer);
+				packBuffer = ArrayPool<byte>.Shared.Rent((int)fileStream.Length);
+			}
+			MemoryStream s = new MemoryStream(packBuffer);
+			fileStream.CopyTo(s);
+			fileStream.Close();
+			s.Close();
+			
 
 			fileDefinitions[hash] = new CDIRFileDefinition()
 			{
 				Offset = offset,
-				Size = (uint)data.Length
+				Size = (uint)length
 			};
-			currentPartWriter.Write(data);
+			currentPartWriter.Write(packBuffer, 0, (int)length);
 
-			currentPartLength += (uint)data.Length;
-			offset += (uint)data.Length;
+			currentPartLength += (uint)length;
+			offset += (uint)length;
 
 			if (currentPartLength <= targetLength)
 				continue;
@@ -176,6 +192,8 @@ public class CDIRFile
 			currentPartWriter.Write("CSEG".ToCharArray());
 			offsets.Add(offset);
 		}
+		
+		ArrayPool<byte>.Shared.Return(packBuffer);
 		
 		currentPartWriter.Flush();
 		currentPartWriter.Close();

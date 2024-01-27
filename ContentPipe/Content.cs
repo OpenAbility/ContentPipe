@@ -103,9 +103,10 @@ public static class Content
 	
 	public static void LoadContentDirectoryPrefixed(string path, string prefix)
 	{
-		if(Providers.ContainsKey(path))
+		string pfxPath = prefix + path;
+		if(Providers.ContainsKey(pfxPath))
 			return;
-		Providers.Add(path, new PrefixedContentProvider(prefix, new CDirContentProvider(new CDIRFile(path))));
+		Providers.Add(pfxPath, new PrefixedContentProvider(prefix, new CDirContentProvider(new CDIRFile(path))));
 	}
 
 	private static void RegisterLoad(string resource)
