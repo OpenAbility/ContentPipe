@@ -65,7 +65,7 @@ internal readonly struct CDirContentProvider : IContentProvider
 	{
 		CDirReadHandle? handle = directory.ReadFile("__content_listing");
 		if (handle == null)
-			return Array.Empty<string>();
+			return directory.GetContent();
 
 		return Encoding.Default.GetString(handle.Read()).Split("|");
 	}

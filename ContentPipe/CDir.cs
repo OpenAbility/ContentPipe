@@ -19,6 +19,10 @@ public class CDIRFile
 
 	public static uint Hash(string str)
 	{
+		if (str.StartsWith("@h@"))
+		{
+			return UInt32.Parse(str[3..]);
+		}
 		const uint multiplier = 37;
 		
 		return str.Aggregate<char, uint>(0, (current, c) => multiplier * current + c);
@@ -88,11 +92,7 @@ public class CDIRFile
 	
 	public string[] GetContent()
 	{
-		CDirReadHandle? handle = ReadFile("__content_listing");
-		if (handle == null)
-			return Array.Empty<string>();
-
-		return Encoding.Default.GetString(handle.Read()).Split("\n");
+		return fileDefinitions.Keys.Select(key => "@h@" + key).ToArray();
 	}
 
 	private static void PushFiles(string root, string path, ref List<FilePair> fileListing, Stack<PackIgnore> ignores)
