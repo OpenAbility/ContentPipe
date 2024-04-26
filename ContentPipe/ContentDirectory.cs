@@ -118,10 +118,16 @@ public struct ContentLump
 	public Stream? Stream;
 
 	/// <summary>
+	/// A unique ID for this content lump
+	/// </summary>
+	public ulong? UniqueID;
+
+	/// <summary>
 	/// Create a content lump with 0:ed fields.
 	/// </summary>
 	public ContentLump()
 	{
 		Name = "";
 	}
+
 }

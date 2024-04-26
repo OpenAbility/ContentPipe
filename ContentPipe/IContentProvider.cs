@@ -58,7 +58,8 @@ internal readonly struct CDirContentProvider : IContentProvider
 		// TODO: Wrap stuff instead!
 		return new ContentLump
 		{
-			Data = handle.Read()
+			Data = handle.Read(),
+			UniqueID = handle.Hash
 		};
 	}
 	public string[] GetContent()

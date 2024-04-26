@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Security.Cryptography;
 using System.Text;
 
 using FilePair = System.Collections.Generic.KeyValuePair<string, string>;
@@ -52,7 +53,7 @@ public class CDIRFile
 
 		ulong readOffset = file.Offset - segmentOffsets[seg] + 4;
 
-		return new CDirReadHandle(readOffset, file.Size, stream);
+		return new CDirReadHandle(readOffset, file.Size, stream, file.Hash);
 	}
 
 	public CDirReadHandle? ReadFile(string file)
@@ -72,13 +73,15 @@ public class CDIRFile
 		for (int i = 0; i < length; i++)
 		{
 			uint hash = reader.ReadUInt32();
+			ulong chash = reader.ReadUInt64();
 			ulong offset = reader.ReadUInt64();
 			uint fileLength = reader.ReadUInt32();
 			
 			fileDefinitions.Add(hash, new CDIRFileDefinition()
 			{
 				Offset = offset,
-				Size = fileLength
+				Size = fileLength,
+				Hash = chash
 			});
 		}
 		
@@ -128,9 +131,14 @@ public class CDIRFile
 
 	public static void Pack(string input, string output, bool listing = true)
 	{
+		using MD5 md5 = MD5.Create();
+		
 		if (input == "")
 			input = ".";
-		// Files can be 1GB max.
+		// Files can be 1GB max. This is maybe not the "optimal" size but fuck you.
+		// Oh and it CAN overflow. It just won't add new files once we surpass the 1 GB barrier.
+		// This means that if you have 950 MB of storage and try to pack a 1 GB file it WILL make the resulting
+		// segment 1.9 GB(ish). But it won't go any further.
 		const ulong targetLength = 1024 * 1024 * 1024;
 		
 		List<FilePair> files = new ();
@@ -171,11 +179,15 @@ public class CDIRFile
 			fileStream.Close();
 			s.Close();
 			
+			byte[] md5Data = md5.ComputeHash(packBuffer);
+			ulong contentHash = BitConverter.ToUInt64(md5Data);
+			
 
 			fileDefinitions[hash] = new CDIRFileDefinition()
 			{
 				Offset = offset,
-				Size = (uint)length
+				Size = (uint)length,
+				Hash = contentHash
 			};
 			currentPartWriter.Write(packBuffer, 0, (int)length);
 
@@ -208,6 +220,7 @@ public class CDIRFile
 		foreach (var cdef in fileDefinitions)
 		{
 			directoryWriter.Write(cdef.Key);
+			directoryWriter.Write(cdef.Value.Hash);
 			directoryWriter.Write(cdef.Value.Offset);
 			directoryWriter.Write(cdef.Value.Size);
 		}
@@ -228,13 +241,16 @@ public class CDirReadHandle : IDisposable
 	public readonly Stream ReadStream;
 	public readonly ulong Length;
 	public readonly ulong ReadOffset;
+	public readonly ulong Hash;
 	
-	public CDirReadHandle(ulong readOffset, ulong length, Stream readStream)
+	public CDirReadHandle(ulong readOffset, ulong length, Stream readStream, ulong hash)
 	{
 		ReadOffset = readOffset;
 		Length = length;
 		ReadStream = readStream;
+		Hash = hash;
 	}
+
 
 	public byte[] Read()
 	{
@@ -255,4 +271,5 @@ public struct CDIRFileDefinition
 {
 	public ulong Offset;
 	public uint Size;
+	public ulong Hash;
 }
