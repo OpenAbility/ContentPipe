@@ -98,7 +98,7 @@ public class CDIRFile
 		return fileDefinitions.Keys.Select(key => "@h@" + key).ToArray();
 	}
 
-	private static void PushFiles(string root, string path, ref List<FilePair> fileListing, Stack<PackIgnore> ignores)
+	private static void PushFiles(string root, string path, ContentPath contentPath, ref List<FilePair> fileListing, Stack<PackIgnore> ignores)
 	{
 		string[] files = Directory.GetFiles(path);
 
@@ -115,13 +115,18 @@ public class CDIRFile
 				continue;
 			if (ignores.Any(i => i.Disallows(file)))
 				continue;
-			fileListing.Add(new FilePair(file, file[(root.Length + 1)..]));
+
+			string fileName = System.IO.Path.GetFileName(file);
+
+			
+			fileListing.Add(new FilePair(file, contentPath.Append(fileName)));
 		}
 
 		string[] dirs = Directory.GetDirectories(path);
 		foreach (var directory in dirs)
 		{
-			PushFiles(root, directory, ref fileListing, ignores);
+			string directoryName = System.IO.Path.GetFileName(directory); // It's not a file but we can treat it like one
+			PushFiles(root, directory, contentPath.Append(directoryName), ref fileListing, ignores);
 		}
 		if (File.Exists(ignorePath))
 		{
@@ -142,7 +147,7 @@ public class CDIRFile
 		const ulong targetLength = 1024 * 1024 * 1024;
 		
 		List<FilePair> files = new ();
-		PushFiles(input, input, ref files, new Stack<PackIgnore>());
+		PushFiles(input, input, new ContentPath(), ref files, new Stack<PackIgnore>());
 		string temp = "__content_listing";
 		if (listing)
 		{

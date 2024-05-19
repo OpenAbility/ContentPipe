@@ -16,6 +16,8 @@ public static class Content
 	/// If Loads should be logged. This will slow down performance of loading by some amount!
 	/// </summary>
 	public static bool ShouldLogLoads = false;
+
+	public static string IdentifierPrefix = "";
 	
 	/// <summary>
 	/// A filter to run on all log load registrations, in case you want to ignore something.
@@ -98,7 +100,7 @@ public static class Content
 	{
 		if(Providers.ContainsKey(path))
 			return;
-		Providers.Add(path, new CDirContentProvider(new CDIRFile(path)));
+		Providers.Add(path, new CDirContentProvider(new CDIRFile(path + ".cdir")));
 	}
 	
 	public static void LoadContentDirectoryPrefixed(string path, string prefix)
@@ -106,7 +108,7 @@ public static class Content
 		string pfxPath = prefix + path;
 		if(Providers.ContainsKey(pfxPath))
 			return;
-		Providers.Add(pfxPath, new PrefixedContentProvider(prefix, new CDirContentProvider(new CDIRFile(path))));
+		Providers.Add(pfxPath, new PrefixedContentProvider(prefix, new CDirContentProvider(new CDIRFile(path + ".cdir"))));
 	}
 
 	private static void RegisterLoad(string resource)
@@ -122,9 +124,16 @@ public static class Content
 	/// </summary>
 	/// <param name="resource">The resource path to load, relative to the directory</param>
 	/// <returns>The content lump loaded, or null if it is not available</returns>
-	public static ContentLump? Load(string resource)
+	public static ContentLump? Load(ContentPath resource)
 	{
-		RegisterLoad(resource);
+		ContentPath noDir = resource.NoDirectoryIdentifier();
+		RegisterLoad(noDir);
+
+		if (resource.DirectoryIdentifier != null && Providers.TryGetValue(IdentifierPrefix + resource.DirectoryIdentifier, out IContentProvider? exProvider))
+		{
+			return exProvider.Load(noDir);
+		}
+		
 		foreach (var provider in Providers.Values)
 		{
 			ContentLump? lump = provider.Load(resource);
@@ -140,8 +149,25 @@ public static class Content
 	/// </summary>
 	/// <param name="resource">The resource path to load, relative to the directory</param>
 	/// <returns>The content lumps loaded</returns>
-	public static ContentLump[] LoadAll(string resource)
+	public static ContentLump[] LoadAll(ContentPath resource)
 	{
+		// Directory identifiers basically nullify LoadAll
+		if (resource.DirectoryIdentifier != null && Providers.TryGetValue(IdentifierPrefix + resource.DirectoryIdentifier, out IContentProvider? exProvider))
+		{
+			ContentPath noDir = resource.NoDirectoryIdentifier();
+			RegisterLoad(noDir);
+			ContentLump? lump = exProvider.Load(noDir);
+			if (lump != null)
+			{
+				return new ContentLump[1]
+				{
+					lump.Value!
+				};
+			}
+			return Array.Empty<ContentLump>();
+		}
+		
+		resource = resource.NoDirectoryIdentifier();
 		RegisterLoad(resource);
 		List<ContentLump> contentLumps = new List<ContentLump>();
 		foreach (var provider in Providers.Values.Reverse())
@@ -160,7 +186,7 @@ public static class Content
 	/// </summary>
 	/// <param name="resource">The resource path to load, relative to the directory</param>
 	/// <returns>The binary data loaded, or an empty byte array if resource isn't available</returns>
-	public static byte[] LoadBytes(string resource)
+	public static byte[] LoadBytes(ContentPath resource)
 	{
 		return LoadBytes(Load(resource));
 	}
@@ -193,7 +219,7 @@ public static class Content
 	/// </summary>
 	/// <param name="resource">The resource path to load, relative to the directory</param>
 	/// <returns>The string loaded, or an empty string if resource doesn't exist</returns>
-	public static string LoadString(string resource)
+	public static string LoadString(ContentPath resource)
 	{
 		return Encoding.UTF8.GetString(LoadBytes(resource));
 	}
@@ -213,7 +239,7 @@ public static class Content
 	/// </summary>
 	/// <param name="resource">The resource path to load, relative to the directory</param>
 	/// <returns>The stream to load, as a MemoryStream, points towards the binary data, or an empty byte array if it is not available</returns>
-	public static Stream LoadStream(string resource)
+	public static Stream LoadStream(ContentPath resource)
 	{
 		return LoadStream(Load(resource));
 	}
@@ -240,7 +266,7 @@ public static class Content
 	/// </summary>
 	/// <param name="resource">The resource path to load, relative to the directory</param>
 	/// <returns>The stream to load, as a MemoryStream, points towards the binary data, or an empty byte array if it is not available</returns>
-	public static byte[][] LoadAllBytes(string resource)
+	public static byte[][] LoadAllBytes(ContentPath resource)
 	{
 		List<byte[]> data = new List<byte[]>();
 		ContentLump[] lumps = LoadAll(resource);
@@ -258,7 +284,7 @@ public static class Content
 	/// </summary>
 	/// <param name="resource">The resource path to load, relative to the directory</param>
 	/// <returns>The stream to load, as a MemoryStream, points towards the binary data, or an empty byte array if it is not available</returns>
-	public static Stream[] LoadAllStreams(string resource)
+	public static Stream[] LoadAllStreams(ContentPath resource)
 	{
 		var allBytes = LoadAll(resource);
 		List<Stream> streams = new List<Stream>();
@@ -277,7 +303,7 @@ public static class Content
 	/// </summary>
 	/// <param name="resource">The resource path to load, relative to the directory</param>
 	/// <returns>The stream to load, as a MemoryStream, points towards the binary data, or an empty byte array if it is not available</returns>
-	public static string[] LoadAllStrings(string resource)
+	public static string[] LoadAllStrings(ContentPath resource)
 	{
 		var allBytes = LoadAll(resource);
 		List<string> strings = new List<string>();
