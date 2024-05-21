@@ -114,7 +114,7 @@ internal readonly struct PhysicalContentProvider : IContentProvider
 	
 	public string[] GetContent()
 	{
-		string[] files =  Directory.GetFiles(directory, "*", SearchOption.AllDirectories);
+		string[] files =  Directory.GetFiles(directory, "*.*", SearchOption.AllDirectories);
 
 		for (int i = 0; i < files.Length; i++)
 		{
