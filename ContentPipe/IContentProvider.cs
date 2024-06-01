@@ -104,9 +104,10 @@ internal readonly struct PhysicalContentProvider : IContentProvider
 		string path = Path.Combine(directory, name);
 		if (File.Exists(path))
 		{
-			return new ContentLump()
+			DateTime lastWrite = File.GetLastWriteTimeUtc(path);
+			return new ContentLump
 			{
-				Stream = File.OpenRead(path), Name = name
+				Stream = File.OpenRead(path), Name = name, UniqueID = (ulong)(lastWrite - DateTime.UnixEpoch).TotalSeconds
 			};
 		}
 		return null;
