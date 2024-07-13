@@ -1,65 +1,112 @@
-﻿using System.IO.Compression;
+using System.Buffers;
+using System.Security.Cryptography;
+using System.Text;
+
+using FilePair = System.Collections.Generic.KeyValuePair<string, string>;
 
 namespace ContentPipe;
 
-/// <summary>
-/// A packed content directory(a .cpkg file), used by the Content class.
-/// </summary>
-public struct ContentDirectory
+public class ContentDirectory
 {
+	private readonly Dictionary<uint, ContentDirectoryFileDef> fileDefinitions = new Dictionary<uint, ContentDirectoryFileDef>();
+	public readonly string Path;
+	private readonly string Origin;
+	private readonly ulong[] segmentOffsets;
 
-	private ZipArchive archive;
-	
-	/// <summary>
-	/// Fetch a content lump, returns null if it is not available
-	/// </summary>
-	/// <param name="name">The path to the resource</param>
-	public ContentLump? this[string name]
+	public ContentDirectory(string path) : this(File.OpenRead(path), path)
 	{
-		get
-		{
-			ZipArchiveEntry? entry = archive.GetEntry(name);
-			if (entry == null)
-				return null;
-			
-			ContentLump contentLump = new()
-			{
-				Name = name,
-				Stream = new ContentStream(entry.Length, entry.Open())
-			};
+		
+	}
 
-			return contentLump;
+	public static uint Hash(string str)
+	{
+		if (str.StartsWith("%h%"))
+		{
+			return UInt32.Parse(str[3..]);
+		}
+		const uint multiplier = 37;
+		
+		return str.Aggregate<char, uint>(0, (current, c) => multiplier * current + c);
+	}
+	
+	public CDirReadHandle? ReadFile(uint hash)
+	{
+		if (!fileDefinitions.TryGetValue(hash, out ContentDirectoryFileDef file))
+			return null;
+
+		// Find the last file with an offset less than the file requested.
+		// This segment will contain the file we want!
+		int seg = -1;
+		for (int i = 0; i < segmentOffsets.Length; i++)
+		{
+			if(segmentOffsets[i] > file.Offset)
+				break;
+			seg = i;
+		}
+
+		// We couldn't find our segment
+		if (seg == -1)
+			return null;
+		
+		// TODO: Research if File.OpenRead is slow, it could be, and we DON'T want that!!!!
+		FileStream stream = File.OpenRead(Path + "_" + seg);
+
+		ulong readOffset = file.Offset - segmentOffsets[seg] + 4;
+
+		return new CDirReadHandle(readOffset, file.Size, stream, file.Hash);
+	}
+
+	public CDirReadHandle? ReadFile(string file)
+	{
+		return ReadFile(Hash(file));
+	}
+
+	public ContentDirectory(Stream stream, string path)
+	{
+		BinaryReader reader = new BinaryReader(stream, Encoding.ASCII, false);
+		if (new string(reader.ReadChars(4)) != "CDIR")
+			throw new InvalidFileException("Invalid file header!");
+
+		Path = path;
+		
+		uint length = reader.ReadUInt32();
+		for (int i = 0; i < length; i++)
+		{
+			uint hash = reader.ReadUInt32();
+			ulong chash = reader.ReadUInt64();
+			ulong offset = reader.ReadUInt64();
+			uint fileLength = reader.ReadUInt32();
+			
+			fileDefinitions.Add(hash, new ContentDirectoryFileDef()
+			{
+				Offset = offset,
+				Size = fileLength,
+				Hash = chash
+			});
+		}
+		
+		length = reader.ReadUInt32();
+		segmentOffsets = new ulong[length];
+		for (int i = 0; i < length; i++)
+		{
+			segmentOffsets[i] = reader.ReadUInt64();
 		}
 	}
 	
-
-	/// <summary>
-	/// Compress a directory into a .cpkg file. It will be stored in the same directory as the source directory,
-	/// if path is "Content/TextData", it will output a file called "Content/TextData.cpkg". This file can then be loaded in the Content class with
-	/// <code>Content.LoadDirectory("Content/TextData");</code>
-	/// </summary>
-	/// <param name="path">The path to the directory to compress</param>
-	public static void CompressDirectory(string path)
+	public string[] GetContent()
 	{
-		if(File.Exists(path + ".cpkg"))
-			File.Delete(path + ".cpkg");
-
-		FileStream fileStream = File.OpenWrite(path + ".cpkg");
-		ZipArchive archive = new ZipArchive(fileStream, ZipArchiveMode.Create);
-		
-		PushFiles(path, path, ref archive, new Stack<PackIgnore>());
-
-		archive.Comment = "Built automatically by CompressDirectory";
-		archive.Dispose();
-		fileStream.Close();
+		var listing = ReadFile("__content_listing");
+		if (listing != null)
+			return Encoding.UTF8.GetString(listing.Read()).Split("|");
+		return fileDefinitions.Keys.Select(key => "%h%" + key).ToArray();
 	}
 
-	private static void PushFiles(string root, string path, ref ZipArchive archive, Stack<PackIgnore> ignores)
+	private static void PushFiles(string root, string path, ContentPath contentPath, ref List<FilePair> fileListing, Stack<PackIgnore> ignores)
 	{
 		string[] files = Directory.GetFiles(path);
 
 		// packignores are wonderful files.
-		string ignorePath = Path.Combine(path, ".packignore");
+		string ignorePath = System.IO.Path.Combine(path, ".packignore");
 		if (File.Exists(ignorePath))
 		{
 			ignores.Push(new PackIgnore(File.ReadAllText(ignorePath), path));
@@ -67,67 +114,170 @@ public struct ContentDirectory
 
 		foreach (var file in files)
 		{
-			if(ignores.Any(i => i.Disallows(file)))
+			if(file.EndsWith(".packignore"))
 				continue;
-			archive.CreateEntryFromFile(file, Path.GetRelativePath(root, file));
+			if (ignores.Any(i => i.Disallows(file)))
+				continue;
+
+			string fileName = System.IO.Path.GetFileName(file);
+
+			
+			fileListing.Add(new FilePair(file, contentPath.Append(fileName)));
 		}
 
 		string[] dirs = Directory.GetDirectories(path);
 		foreach (var directory in dirs)
 		{
-			PushFiles(root, directory, ref archive, ignores);
+			string directoryName = System.IO.Path.GetFileName(directory); // It's not a file but we can treat it like one
+			PushFiles(root, directory, contentPath.Append(directoryName), ref fileListing, ignores);
 		}
-	}
-
-	/// <summary>
-	/// Load a packed content directory(a .cpkg file) from a path
-	/// </summary>
-	/// <param name="path">The path to the file, excluding the extension</param>
-	public ContentDirectory(string path)
-	{
-		string fileName = path + ".cpkg";
-		archive = ZipFile.OpenRead(fileName);
-		Content = new string[archive.Entries.Count];
-		for (int i = 0; i < archive.Entries.Count; i++)
+		if (File.Exists(ignorePath))
 		{
-			Content[i] = archive.Entries[i].FullName;
+			ignores.Pop();
 		}
 	}
 
-	public readonly string[] Content;
+	public static void Pack(string input, string output, bool listing = true)
+	{
+		using MD5 md5 = MD5.Create();
+		
+		if (input == "")
+			input = ".";
+		// Files can be 1GB max. This is maybe not the "optimal" size but fuck you.
+		// Oh and it CAN overflow. It just won't add new files once we surpass the 1 GB barrier.
+		// This means that if you have 950 MB of storage and try to pack a 1 GB file it WILL make the resulting
+		// segment 1.9 GB(ish). But it won't go any further.
+		const ulong targetLength = 1024 * 1024 * 1024;
+		
+		List<FilePair> files = new ();
+		PushFiles(input, input, new ContentPath(), ref files, new Stack<PackIgnore>());
+		string temp = "__content_listing";
+		if (listing)
+		{
+			File.WriteAllText(temp, String.Join("|", files.Select(f => f.Value)));
+			files.Add(new KeyValuePair<string, string>(temp, temp));
+		}
+
+		List<ulong> offsets = new List<ulong>();
+		Dictionary<uint, ContentDirectoryFileDef> fileDefinitions = new Dictionary<uint, ContentDirectoryFileDef>();
+
+		ulong offset = 0;
+		ulong currentPartLength = 0;
+		ulong currentPart = 0;
+		offsets.Add(0);
+		BinaryWriter currentPartWriter = new BinaryWriter(File.OpenWrite(output + "_0"), Encoding.ASCII, false);
+		currentPartWriter.Write("CSEG".ToCharArray());
+
+		byte[] packBuffer = ArrayPool<byte>.Shared.Rent(1024);
+		foreach (FilePair file in files)
+		{
+			// Ugly hack
+			uint hash = Hash(file.Value);
+
+			FileStream fileStream = File.OpenRead(file.Key);
+			long length = fileStream.Length;
+			// If it's too big we have to reallocate
+			if (packBuffer.Length < fileStream.Length)
+			{
+				ArrayPool<byte>.Shared.Return(packBuffer);
+				packBuffer = ArrayPool<byte>.Shared.Rent((int)fileStream.Length);
+			}
+			MemoryStream s = new MemoryStream(packBuffer);
+			fileStream.CopyTo(s);
+			fileStream.Close();
+			s.Close();
+			
+			byte[] md5Data = md5.ComputeHash(packBuffer);
+			ulong contentHash = BitConverter.ToUInt64(md5Data);
+			
+
+			fileDefinitions[hash] = new ContentDirectoryFileDef()
+			{
+				Offset = offset,
+				Size = (uint)length,
+				Hash = contentHash
+			};
+			currentPartWriter.Write(packBuffer, 0, (int)length);
+
+			currentPartLength += (uint)length;
+			offset += (uint)length;
+
+			if (currentPartLength <= targetLength)
+				continue;
+			currentPart++;
+			currentPartLength = 0;
+			currentPartWriter.Flush();
+			currentPartWriter.Close();
+			currentPartWriter = new BinaryWriter(File.OpenWrite(output + "_" + currentPart), Encoding.ASCII, false);
+			currentPartWriter.Write("CSEG".ToCharArray());
+			offsets.Add(offset);
+		}
+		
+		ArrayPool<byte>.Shared.Return(packBuffer);
+		
+		currentPartWriter.Flush();
+		currentPartWriter.Close();
+
+		if(listing)
+			File.Delete(temp);
+		
+		BinaryWriter directoryWriter = new BinaryWriter(File.OpenWrite(output), Encoding.ASCII, false);
+		directoryWriter.Write("CDIR".ToCharArray());
+		directoryWriter.Write((uint)fileDefinitions.Count);
+
+		foreach (var cdef in fileDefinitions)
+		{
+			directoryWriter.Write(cdef.Key);
+			directoryWriter.Write(cdef.Value.Hash);
+			directoryWriter.Write(cdef.Value.Offset);
+			directoryWriter.Write(cdef.Value.Size);
+		}
+		
+		directoryWriter.Write(offsets.Count);
+		foreach (var o in offsets)
+		{
+			directoryWriter.Write(o);
+		}
+		
+		directoryWriter.Flush();
+		directoryWriter.Close();
+	}
 }
 
-/// <summary>
-/// A content lump, or in other words, a named byte array. Used to store data in a cpkg file.
-/// </summary>
-public struct ContentLump
+public class CDirReadHandle : IDisposable
 {
-	/// <summary>
-	/// The name of the content lump
-	/// </summary>
-	public string Name;
-
-	/// <summary>
-	/// The data of the ContentLump
-	/// </summary>
-	public byte[]? Data;
+	public readonly Stream ReadStream;
+	public readonly ulong Length;
+	public readonly ulong ReadOffset;
+	public readonly ulong Hash;
 	
-	/// <summary>
-	/// The stream to the data of the lump
-	/// </summary>
-	public Stream? Stream;
-
-	/// <summary>
-	/// A unique ID for this content lump
-	/// </summary>
-	public ulong? UniqueID;
-
-	/// <summary>
-	/// Create a content lump with 0:ed fields.
-	/// </summary>
-	public ContentLump()
+	public CDirReadHandle(ulong readOffset, ulong length, Stream readStream, ulong hash)
 	{
-		Name = "";
+		ReadOffset = readOffset;
+		Length = length;
+		ReadStream = readStream;
+		Hash = hash;
 	}
 
+
+	public byte[] Read()
+	{
+		byte[] read = new byte[Length];
+		ReadStream.Position = (long)ReadOffset;
+		ReadStream.Read(read);
+		return read;
+	}
+
+
+	public void Dispose()
+	{
+		ReadStream.Dispose();
+	}
+}
+
+public struct ContentDirectoryFileDef
+{
+	public ulong Offset;
+	public uint Size;
+	public ulong Hash;
 }

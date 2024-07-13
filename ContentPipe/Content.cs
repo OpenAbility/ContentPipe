@@ -8,7 +8,7 @@ namespace ContentPipe;
 /// </summary>
 public static class Content
 {
-	private static readonly Dictionary<string, IContentProvider> Providers = new Dictionary<string, IContentProvider>();
+	private static readonly List<ContentMount> Mounts = new List<ContentMount>();
 	
 	private static readonly Dictionary<string, int> LoadedContent = new Dictionary<string, int>();
 	
@@ -18,6 +18,11 @@ public static class Content
 	public static bool ShouldLogLoads = false;
 
 	public static string IdentifierPrefix = "";
+
+	/// <summary>
+	/// The currently active content compiler
+	/// </summary>
+	public static IContentCompiler? ContentCompiler;
 	
 	/// <summary>
 	/// A filter to run on all log load registrations, in case you want to ignore something.
@@ -26,89 +31,31 @@ public static class Content
 	public static Regex LogLoadIgnoreFilter = new Regex("");
 
 	/// <summary>
-	/// Load a packed content directory(.cpkg file)
+	/// Mount a ContentMount
 	/// </summary>
-	/// <param name="path">The path to the directory without extension</param>
-	public static void LoadDirectory(string path)
+	/// <param name="mount">The mount to add</param>
+	/// <returns>True if it was mounted, otherwise false</returns>
+	public static bool Mount(ContentMount mount)
 	{
-		if(Providers.ContainsKey(path))
-			return;
-		Providers.Add(path, new PacketContentProvider(new ContentDirectory(path)));
-	}
-	
-	/// <summary>
-	/// Load a packed ContentDirectory where all content has a prefix.
-	/// </summary>
-	/// <param name="path">The path to the cpkg directory, without extension</param>
-	/// <param name="prefix">The prefix to be used for said directory</param>
-	/// <returns>The string to be used when unloading, as prefixing slightly modifies the string</returns>
-	public static string LoadPrefixed(string path, string prefix)
-	{
-		string pfxPath = prefix + path;
-		if(!Providers.ContainsKey(pfxPath))
-			Providers.Add(pfxPath, new PrefixedContentProvider(prefix, new PacketContentProvider(new ContentDirectory(path))));
-		return pfxPath;
-	}
-	
-	/// <summary>
-	/// Load a packed ContentDirectory where all content has a prefix.
-	/// </summary>
-	/// <param name="path">The path to the physical directory</param>
-	/// <param name="prefix">The prefix to be used for said directory</param>
-	/// <returns>The string to be used when unloading, as prefixing slightly modifies the string</returns>
-	public static string LoadPhysPrefixed(string path, string prefix)
-	{
-		string pfxPath = prefix + path;
-		if(!Providers.ContainsKey(pfxPath))
-			Providers.Add(pfxPath, new PrefixedContentProvider(prefix, new PhysicalContentProvider(path)));
-		return pfxPath;
-	}
-	
-	/// <summary>
-	/// Unload a packed content directory
-	/// </summary>
-	/// <param name="path">The same as you used when you loaded it(path without extension)</param>
-	public static void Unload(string path)
-	{
-		if (Providers.ContainsKey(path))
-			Providers.Remove(path);
-	}
-	
-	/// <summary>
-	/// Unload all content directories
-	/// </summary>
-	public static void UnloadAll()
-	{
-		Providers.Clear();
-	}
-	
-	/// <summary>
-	/// Load a physical directory(a directory on disk)
-	/// </summary>
-	/// <param name="path">The path to the directory</param>
-	public static void LoadPhysicalDirectory(string path)
-	{
-		if(Providers.ContainsKey(path))
-			return;
-		if(!Directory.Exists(path))
-			return;
-		
-		Providers.Add(path, new PhysicalContentProvider(path));
+		if (Mounts.Contains(mount))
+			return false;
+		Mounts.Add(mount);
+		return true;
 	}
 
-	public static void LoadContentDirectory(string path)
+	/// <summary>
+	/// Unmount a ContentMount
+	/// </summary>
+	/// <param name="mount">The mount to unmount</param>
+	/// <returns>True if it was unmounted, otherwise false</returns>
+	public static bool Unmount(ContentMount mount)
 	{
-		if(Providers.ContainsKey(path))
-			return;
-		Providers.Add(path, new CDirContentProvider(new CDIRFile(path + ".cdir")));
+		return Mounts.Remove(mount);
 	}
 	
-	public static void LoadContentDirectoryPrefixed(string path, string prefix)
+	public static void UnmountAll()
 	{
-		string pfxPath = prefix + path;
-		if(Providers.ContainsKey(pfxPath))
-			return;
-		Providers.Add(pfxPath, new PrefixedContentProvider(prefix, new CDirContentProvider(new CDIRFile(path + ".cdir"))));
+		Mounts.Clear();
 	}
 
 	private static void RegisterLoad(string resource)
@@ -129,14 +76,16 @@ public static class Content
 		ContentPath noDir = resource.NoDirectoryIdentifier();
 		RegisterLoad(noDir);
 
-		if (resource.DirectoryIdentifier != null && Providers.TryGetValue(IdentifierPrefix + resource.DirectoryIdentifier, out IContentProvider? exProvider))
+		if (resource.DirectoryIdentifier != null)
 		{
-			return exProvider.Load(noDir);
+			ContentMount? mount = Mounts.Find(m => m.ID == resource.DirectoryIdentifier);
+			if(mount != null)
+				return mount.Load(noDir);
 		}
 		
-		foreach (var provider in Providers.Values)
+		foreach (var mount in Mounts)
 		{
-			ContentLump? lump = provider.Load(resource);
+			ContentLump? lump = mount.Load(resource);
 
 			if (lump != null)
 				return lump;
@@ -152,11 +101,12 @@ public static class Content
 	public static ContentLump[] LoadAll(ContentPath resource)
 	{
 		// Directory identifiers basically nullify LoadAll
-		if (resource.DirectoryIdentifier != null && Providers.TryGetValue(IdentifierPrefix + resource.DirectoryIdentifier, out IContentProvider? exProvider))
+		if (resource.DirectoryIdentifier != null)
 		{
+			ContentMount? mount = Mounts.Find(m => m.ID == resource.DirectoryIdentifier);
 			ContentPath noDir = resource.NoDirectoryIdentifier();
 			RegisterLoad(noDir);
-			ContentLump? lump = exProvider.Load(noDir);
+			ContentLump? lump = mount.Load(noDir);
 			if (lump != null)
 			{
 				return new ContentLump[1]
@@ -170,15 +120,35 @@ public static class Content
 		resource = resource.NoDirectoryIdentifier();
 		RegisterLoad(resource);
 		List<ContentLump> contentLumps = new List<ContentLump>();
-		foreach (var provider in Providers.Values.Reverse())
+		foreach (var mount in Mounts)
 		{
-			ContentLump? lump = provider.Load(resource);
+			ContentLump? lump = mount.Load(resource);
 
 			if (lump != null)
 				contentLumps.Add(lump.Value);
 		}
 		
 		return contentLumps.ToArray();
+	}
+
+	public static void RequestCompiles(ContentPath resource)
+	{
+		if (resource.DirectoryIdentifier != null)
+		{
+			ContentMount? mount = Mounts.Find(m => m.ID == resource.DirectoryIdentifier);
+			if (mount != null)
+			{
+				ContentPath noDir = resource.NoDirectoryIdentifier();
+				mount.RequestCompile(noDir);
+				return;
+			}
+		}
+		
+		resource = resource.NoDirectoryIdentifier();
+		foreach (var mount in Mounts)
+		{
+			mount.RequestCompile(resource);
+		}
 	}
 
 	/// <summary>
@@ -327,9 +297,9 @@ public static class Content
 
 		if (includeDeadResources)
 		{
-			foreach (var provider in Providers)
+			foreach (var mount in Mounts)
 			{
-				string[] resources = provider.Value.GetContent();
+				ContentPath[] resources = mount.GetContent();
 				foreach (var res in resources)
 				{
 					if(!String.IsNullOrWhiteSpace(res))
@@ -351,11 +321,11 @@ public static class Content
 	/// Get all content, including duplicates
 	/// </summary>
 	/// <returns>An enumerable returning each file available, including duplicates.</returns>
-	public static IEnumerable<string> GetAllContent()
+	public static IEnumerable<ContentPath> GetAllContent(bool packable = false)
 	{
-		foreach (var provider in Providers)
+		foreach (var mount in Mounts)
 		{
-			string[] cont = provider.Value.GetContent();
+			ContentPath[] cont = mount.GetContent(packable);
 			foreach (var v in cont)
 			{
 				yield return v;
