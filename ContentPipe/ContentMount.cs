@@ -57,7 +57,7 @@ public class ContentMount
 
 	public ContentLump? Load(ContentPath path)
 	{
-		if (MountPoint != null && !(MountPoint == path.Parts[0] || MountPoint != path.MountPoint))
+		if (MountPoint != null && !(MountPoint == path.Parts.FirstOrDefault() || MountPoint != path.MountPoint))
 			return null;
 
 		ContentPath loadablePath = path.NoDirectoryIdentifier().RemoveMount(this);
