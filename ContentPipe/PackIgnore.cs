@@ -23,7 +23,7 @@ internal class PackIgnore
 
 	public bool Disallows(string file)
 	{
-		file = file[(Path.Length + 1)..];
+		file = System.IO.Path.GetRelativePath(Path, file);
 		string[] parts = file.Split("/");
 		if (parts.Length < 1)
 			return true;

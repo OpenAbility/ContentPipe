@@ -49,7 +49,7 @@ public readonly struct ContentPath
 
 	public override string ToString()
 	{
-		// It's basically just a regular old path.;
+		// It's basically just a regular old path.
 		List<string> pathParts = new List<string>();
 		if (DirectoryIdentifier != null)
 			pathParts.Add("$" + DirectoryIdentifier);
@@ -72,6 +72,11 @@ public readonly struct ContentPath
 	public ContentPath MoveUp()
 	{
 		return new ContentPath(Parts[..^1], DirectoryIdentifier, MountPoint);
+	}
+	
+	public ContentPath MoveIn()
+	{
+		return new ContentPath(Parts[1..], DirectoryIdentifier, MountPoint);
 	}
 	
 	public static implicit operator string(ContentPath path)

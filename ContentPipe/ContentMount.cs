@@ -74,7 +74,7 @@ public class ContentMount
 			{
 				Data = handle.Read(),
 				Name = path,
-				UniqueID = handle.Hash
+				UniqueID = handle.Checksum
 			};
 		} else if (Type == ContentMountType.PhysicalDirectory)
 		{
@@ -122,26 +122,27 @@ public class ContentMount
 		return null;
 	}
 	
-	public ContentPath[] GetContent(bool packable = false)
+	public IEnumerable<ContentPath> GetContent(bool packable = false)
 	{
 		if (Type == ContentMountType.PackedDirectory)
 		{
-			return contentDirectory!.GetContent().Select(c => new ContentPath(c)).ToArray();
+			//return contentDirectory!.GetContent().Select(c => new ContentPath(c)).ToArray();
 		} else if (Type == ContentMountType.PhysicalDirectory)
 		{
-			List<ContentPath> paths = new List<ContentPath>();
 			ContentPath root = new ContentPath();
 			if (MountPoint != null)
 				root = root.AddMount(MountPoint);
 			Stack<PackIgnore>? ignores = packable ? new Stack<PackIgnore>() : null;
-			EnumerateDirectory(new DirectoryInfo(PhysicalPath), ref paths, root, ignores);
-			return paths.ToArray();
+			
+			foreach (ContentPath contentPath in EnumerateDirectory(new DirectoryInfo(PhysicalPath), root, ignores))
+			{
+				yield return contentPath;
+			}
 		}
-		return Array.Empty<ContentPath>();
 	}
 	
 	
-	private void EnumerateDirectory(DirectoryInfo directory, ref List<ContentPath> paths, ContentPath parentPath, Stack<PackIgnore>? ignoreStack)
+	private IEnumerable<ContentPath> EnumerateDirectory(DirectoryInfo directory, ContentPath parentPath, Stack<PackIgnore>? ignoreStack)
 	{
 		if (ignoreStack != null)
 		{
@@ -162,8 +163,7 @@ public class ContentMount
 					continue;
 			}
 
-
-			paths.Add(parentPath.Append(file.Name));
+			yield return parentPath.Append(file.Name);
 		}
 
 		foreach (var subdir in directory.GetDirectories())
@@ -171,7 +171,11 @@ public class ContentMount
 			// We push the path here. If we did it earlier it'd break.
 			// If we mount the dir "Content", all paths would be "Content/...." when we want
 			// "...." without the "Content". You get it?
-			EnumerateDirectory(subdir, ref paths, parentPath.Append(subdir.Name), ignoreStack);
+
+			foreach (var path in EnumerateDirectory(subdir, parentPath.Append(subdir.Name), ignoreStack))
+			{
+				yield return path;
+			}
 		}
 	}
 }

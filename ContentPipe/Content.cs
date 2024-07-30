@@ -299,8 +299,7 @@ public static class Content
 		{
 			foreach (var mount in Mounts)
 			{
-				ContentPath[] resources = mount.GetContent();
-				foreach (var res in resources)
+				foreach (var res in mount.GetContent())
 				{
 					if(!String.IsNullOrWhiteSpace(res))
 						LoadedContent.TryAdd(res, 0);
@@ -325,8 +324,7 @@ public static class Content
 	{
 		foreach (var mount in Mounts)
 		{
-			ContentPath[] cont = mount.GetContent(packable);
-			foreach (var v in cont)
+			foreach (var v in mount.GetContent(packable))
 			{
 				yield return v;
 			}

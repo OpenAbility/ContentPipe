@@ -1,17 +1,14 @@
-using System.Buffers;
 using System.Security.Cryptography;
 using System.Text;
-
-using FilePair = System.Collections.Generic.KeyValuePair<string, string>;
 
 namespace ContentPipe;
 
 public class ContentDirectory
 {
-	private readonly Dictionary<uint, ContentDirectoryFileDef> fileDefinitions = new Dictionary<uint, ContentDirectoryFileDef>();
+	private readonly DirectoryDefinition RootDirectory;
 	public readonly string Path;
 	private readonly string Origin;
-	private readonly ulong[] segmentOffsets;
+	private ulong[] segmentOffsets;
 
 	public ContentDirectory(string path) : this(File.OpenRead(path), path)
 	{
@@ -28,18 +25,51 @@ public class ContentDirectory
 		
 		return str.Aggregate<char, uint>(0, (current, c) => multiplier * current + c);
 	}
-	
-	public CDirReadHandle? ReadFile(uint hash)
+
+	private FileDefinition? GetFile(ContentPath path, DirectoryDefinition current)
 	{
-		if (!fileDefinitions.TryGetValue(hash, out ContentDirectoryFileDef file))
+		// It's the last part, or in other words, the file.
+		if (path.Parts.Length == 1)
+		{
+			if (current.Files.TryGetValue(path.Parts[0], out FileDefinition definition))
+				return definition;
 			return null;
+		}
+
+		if (current.Directories.TryGetValue(path.Parts[0], out DirectoryDefinition directory))
+			return GetFile(path.MoveIn(), directory);
+		return null;
+	}
+	
+	public CDirReadHandle? ReadFile(ContentPath path)
+	{
+		// If there are no parts, return null.
+		if (path.Parts.Length == 0)
+			return null;
+
+		// If the root name ain't empty, and we ain't giving the proper
+		// path to root.
+		if (RootDirectory.Name != "" && RootDirectory.Name != path.Parts[0])
+			return null;
+		
+		FileDefinition? file = null;
+		if (RootDirectory.Name != "")
+			file = GetFile(path.MoveIn(), RootDirectory);
+		else
+			file = GetFile(path, RootDirectory);
+
+
+		if (file == null)
+			return null;
+		
+		
 
 		// Find the last file with an offset less than the file requested.
 		// This segment will contain the file we want!
 		int seg = -1;
 		for (int i = 0; i < segmentOffsets.Length; i++)
 		{
-			if(segmentOffsets[i] > file.Offset)
+			if(segmentOffsets[i] > file!.Value.Offset)
 				break;
 			seg = i;
 		}
@@ -51,196 +81,227 @@ public class ContentDirectory
 		// TODO: Research if File.OpenRead is slow, it could be, and we DON'T want that!!!!
 		FileStream stream = File.OpenRead(Path + "_" + seg);
 
-		ulong readOffset = file.Offset - segmentOffsets[seg] + 4;
+		ulong readOffset = file.Value.Offset - segmentOffsets[seg] + 4;
 
-		return new CDirReadHandle(readOffset, file.Size, stream, file.Hash);
-	}
-
-	public CDirReadHandle? ReadFile(string file)
-	{
-		return ReadFile(Hash(file));
+		return new CDirReadHandle(readOffset, file.Value.Size, stream, path, file.Value.Checksum);
 	}
 
 	public ContentDirectory(Stream stream, string path)
 	{
 		BinaryReader reader = new BinaryReader(stream, Encoding.ASCII, false);
-		if (new string(reader.ReadChars(4)) != "CDIR")
+		if (new string(reader.ReadChars(4)) != "CDR2")
 			throw new InvalidFileException("Invalid file header!");
 
 		Path = path;
 		
-		uint length = reader.ReadUInt32();
-		for (int i = 0; i < length; i++)
-		{
-			uint hash = reader.ReadUInt32();
-			ulong chash = reader.ReadUInt64();
-			ulong offset = reader.ReadUInt64();
-			uint fileLength = reader.ReadUInt32();
+		uint version = reader.ReadUInt32();
+		if(version != 2)
+			throw new InvalidFileException("Unsupported version " + version);
+
+		RootDirectory = LoadDirectory(reader);
 			
-			fileDefinitions.Add(hash, new ContentDirectoryFileDef()
-			{
-				Offset = offset,
-				Size = fileLength,
-				Hash = chash
-			});
-		}
-		
-		length = reader.ReadUInt32();
-		segmentOffsets = new ulong[length];
-		for (int i = 0; i < length; i++)
+		uint segments = reader.ReadUInt32();
+		segmentOffsets = new ulong[segments];
+		for (uint i = 0; i < segments; i++)
 		{
 			segmentOffsets[i] = reader.ReadUInt64();
 		}
 	}
-	
-	public string[] GetContent()
-	{
-		var listing = ReadFile("__content_listing");
-		if (listing != null)
-			return Encoding.UTF8.GetString(listing.Read()).Split("|");
-		return fileDefinitions.Keys.Select(key => "%h%" + key).ToArray();
-	}
 
-	private static void PushFiles(string root, string path, ContentPath contentPath, ref List<FilePair> fileListing, Stack<PackIgnore> ignores)
+	private static DirectoryDefinition LoadDirectory(BinaryReader reader)
 	{
-		string[] files = Directory.GetFiles(path);
-
-		// packignores are wonderful files.
-		string ignorePath = System.IO.Path.Combine(path, ".packignore");
-		if (File.Exists(ignorePath))
+		DirectoryDefinition directoryDefinition = new DirectoryDefinition();
+		directoryDefinition.Name = reader.ReadTerminatedString();
+		
+		uint subdirectories = reader.ReadUInt32();
+		for (uint i = 0; i < subdirectories; i++)
 		{
-			ignores.Push(new PackIgnore(File.ReadAllText(ignorePath), path));
+			DirectoryDefinition subdirectory = LoadDirectory(reader);
+			directoryDefinition.Directories[subdirectory.Name] = subdirectory;
+		}
+		
+		uint files = reader.ReadUInt32();
+		for (uint i = 0; i < files; i++)
+		{
+			FileDefinition fileDefinition = new FileDefinition();
+			fileDefinition.Name = reader.ReadTerminatedString();
+			fileDefinition.Checksum = reader.ReadUInt64();
+			fileDefinition.Offset = reader.ReadUInt64();
+			fileDefinition.Size = reader.ReadUInt32();
+			directoryDefinition.Files[fileDefinition.Name] = fileDefinition;
 		}
 
-		foreach (var file in files)
+		return directoryDefinition;
+	}
+
+	private static DirectoryDefinition BuildDirectory(DirectoryInfo info, Stack<PackIgnore> ignoreStack)
+	{
+		// Much, much nicer directory searching that uses DirectoryInfo.
+		// Makes everything much cleaner and less hacky.
+		DirectoryDefinition directoryDefinition = new DirectoryDefinition();
+		directoryDefinition.Name = info.Name;
+		directoryDefinition.DirectoryInfo = info;
+		
+		string ignorePath = System.IO.Path.Join(info.FullName, ".packignore");
+		if (File.Exists(ignorePath))
 		{
-			if(file.EndsWith(".packignore"))
-				continue;
-			if (ignores.Any(i => i.Disallows(file)))
-				continue;
+			ignoreStack.Push(new PackIgnore(File.ReadAllText(ignorePath), info.FullName));
+		}
 
-			string fileName = System.IO.Path.GetFileName(file);
-
+		foreach (var subInfo in info.GetDirectories())
+		{
+			DirectoryDefinition directory = BuildDirectory(subInfo, ignoreStack);
+			directoryDefinition.Directories[directory.Name] = directory;
+		}
+		
+		foreach (var file in info.GetFiles())
+		{
+			if (file.Name == ".packignore")
+				continue;
+			if(ignoreStack.Any(s => s.Disallows(file.FullName)))
+				continue;
 			
-			fileListing.Add(new FilePair(file, contentPath.Append(fileName)));
+			FileDefinition definition = new FileDefinition
+			{
+				Name = file.Name,
+				FileInfo = file
+			};
+			directoryDefinition.Files[definition.Name] = definition;
 		}
 
-		string[] dirs = Directory.GetDirectories(path);
-		foreach (var directory in dirs)
+
+		return directoryDefinition;
+	}
+
+	private static void Write(DirectoryDefinition definition, WriteContext writeContext)
+	{
+		writeContext.Writer.Write(definition.Name.ToCharArray());
+		writeContext.Writer.Write((byte)0);
+		
+		writeContext.Writer.Write((uint)definition.Directories.Count);
+		foreach (DirectoryDefinition dir in definition.Directories.Values)
 		{
-			string directoryName = System.IO.Path.GetFileName(directory); // It's not a file but we can treat it like one
-			PushFiles(root, directory, contentPath.Append(directoryName), ref fileListing, ignores);
+			Write(dir, writeContext);
 		}
-		if (File.Exists(ignorePath))
+		
+		writeContext.Writer.Write((uint)definition.Files.Count);
+		foreach (FileDefinition file in definition.Files.Values)
 		{
-			ignores.Pop();
+			using FileStream fs = file.FileInfo!.OpenRead();
+			
+			writeContext.Writer.Write(file.Name.ToCharArray());
+			writeContext.Writer.Write((byte)0);
+			
+			writeContext.Writer.Write(0ul);
+			writeContext.Writer.Write(writeContext.WriteFile(fs, (ulong)fs.Length));
+			writeContext.Writer.Write((uint)fs.Length);
 		}
 	}
 
-	public static void Pack(string input, string output, bool listing = true)
+	public static void Pack(string input, string output, bool listing = true, bool globalRoot = true)
 	{
 		using MD5 md5 = MD5.Create();
 		
 		if (input == "")
 			input = ".";
-		// Files can be 1GB max. This is maybe not the "optimal" size but fuck you.
-		// Oh and it CAN overflow. It just won't add new files once we surpass the 1 GB barrier.
-		// This means that if you have 950 MB of storage and try to pack a 1 GB file it WILL make the resulting
-		// segment 1.9 GB(ish). But it won't go any further.
-		const ulong targetLength = 1024 * 1024 * 1024;
+
 		
-		List<FilePair> files = new ();
-		PushFiles(input, input, new ContentPath(), ref files, new Stack<PackIgnore>());
-		string temp = "__content_listing";
-		if (listing)
+		DirectoryInfo readDirectory = new DirectoryInfo(input);
+		DirectoryDefinition definition = BuildDirectory(readDirectory, new Stack<PackIgnore>());
+		// If the root dir has an empty name that means it is "global", and mustn't
+		// be directly addressed. If it is non-empty, it will always take it into account
+		// when searching.
+		if (globalRoot)
+			definition.Name = "";
+
+		using FileStream outputStream = File.OpenWrite(output);
+		using BinaryWriter writer = new BinaryWriter(outputStream);
+		
+		writer.Write("CDR2".ToCharArray());
+		writer.Write(2u);
+		
+		WriteContext writeContext = new WriteContext(output, writer);
+		Write(definition, writeContext);
+		writeContext.Finish();
+
+		writer.Write((ulong)writeContext.SegmentOffset.Count);
+		foreach (ulong segment in writeContext.SegmentOffset)
 		{
-			File.WriteAllText(temp, String.Join("|", files.Select(f => f.Value)));
-			files.Add(new KeyValuePair<string, string>(temp, temp));
+			writer.Write(segment);
+		}
+	}
+
+	// General container class for writing CDIR files
+	private class WriteContext
+	{
+		
+		// Valve has the VPK format which is quite simmilar to CDIR.
+		// Now, they use somewhere from 100-200 megs in TF2 for archive
+		// file size limits. I'm going for the upper limit as my personal
+		// use case might include slightly larger files, plus I'd prefer not
+		// to have a gazillion parts.
+		// Now for the bigger question: How many bytes in a kilobyte?
+		// I don't fucking know and no matter what I choose people will be mad.
+		// So, my solution is to just say fuck you to everyone and use both:
+		public const ulong TargetLength = 1024 * 1000 * 200;
+
+		private ulong totalOffset;
+		private ulong currentSegmentSize = 0;
+		private FileStream? writeStream;
+		private string baseFileName;
+
+		public List<ulong> SegmentOffset = new List<ulong>();
+
+
+		public readonly BinaryWriter Writer;
+
+		public WriteContext(string baseFile, BinaryWriter writer)
+		{
+			baseFileName = baseFile;
+			Writer = writer;
 		}
 
-		List<ulong> offsets = new List<ulong>();
-		Dictionary<uint, ContentDirectoryFileDef> fileDefinitions = new Dictionary<uint, ContentDirectoryFileDef>();
 
-		ulong offset = 0;
-		ulong currentPartLength = 0;
-		ulong currentPart = 0;
-		offsets.Add(0);
-		BinaryWriter currentPartWriter = new BinaryWriter(File.OpenWrite(output + "_0"), Encoding.ASCII, false);
-		currentPartWriter.Write("CSEG".ToCharArray());
-
-		byte[] packBuffer = ArrayPool<byte>.Shared.Rent(1024);
-		foreach (FilePair file in files)
+		private void NewFile()
 		{
-			// Ugly hack
-			uint hash = Hash(file.Value);
+			currentSegmentSize = 0;
+			writeStream?.Flush();
+			writeStream?.Close();
+			writeStream?.Dispose();
+			writeStream = File.OpenWrite(baseFileName + "_" + SegmentOffset.Count);
+			SegmentOffset.Add(totalOffset);
 
-			FileStream fileStream = File.OpenRead(file.Key);
-			long length = fileStream.Length;
-			// If it's too big we have to reallocate
-			if (packBuffer.Length < fileStream.Length)
+			BinaryWriter writer = new BinaryWriter(writeStream, Encoding.UTF8, false);
+			writer.Write("CSEG".ToCharArray());
+		}
+		
+		public ulong WriteFile(Stream stream, ulong size)
+		{
+			if(writeStream == null)
+				NewFile();
+			// We'll try to split early(I think?)
+			// idk, seem to get mixed results, but it
+			// might also be the good ol' 1024v1000 debate.
+			if (currentSegmentSize + size > TargetLength)
 			{
-				ArrayPool<byte>.Shared.Return(packBuffer);
-				packBuffer = ArrayPool<byte>.Shared.Rent((int)fileStream.Length);
+				NewFile();
 			}
-			MemoryStream s = new MemoryStream(packBuffer);
-			fileStream.CopyTo(s);
-			fileStream.Close();
-			s.Close();
+			ulong fileOffset = totalOffset;
 			
-			byte[] md5Data = md5.ComputeHash(packBuffer);
-			ulong contentHash = BitConverter.ToUInt64(md5Data);
-			
+			stream.CopyTo(writeStream!);
 
-			fileDefinitions[hash] = new ContentDirectoryFileDef()
-			{
-				Offset = offset,
-				Size = (uint)length,
-				Hash = contentHash
-			};
-			currentPartWriter.Write(packBuffer, 0, (int)length);
-
-			currentPartLength += (uint)length;
-			offset += (uint)length;
-
-			if (currentPartLength <= targetLength)
-				continue;
-			currentPart++;
-			currentPartLength = 0;
-			currentPartWriter.Flush();
-			currentPartWriter.Close();
-			currentPartWriter = new BinaryWriter(File.OpenWrite(output + "_" + currentPart), Encoding.ASCII, false);
-			currentPartWriter.Write("CSEG".ToCharArray());
-			offsets.Add(offset);
+			totalOffset += size;
+			currentSegmentSize += size;
+			return fileOffset;
 		}
-		
-		ArrayPool<byte>.Shared.Return(packBuffer);
-		
-		currentPartWriter.Flush();
-		currentPartWriter.Close();
 
-		if(listing)
-			File.Delete(temp);
-		
-		BinaryWriter directoryWriter = new BinaryWriter(File.OpenWrite(output), Encoding.ASCII, false);
-		directoryWriter.Write("CDIR".ToCharArray());
-		directoryWriter.Write((uint)fileDefinitions.Count);
-
-		foreach (var cdef in fileDefinitions)
+		public void Finish()
 		{
-			directoryWriter.Write(cdef.Key);
-			directoryWriter.Write(cdef.Value.Hash);
-			directoryWriter.Write(cdef.Value.Offset);
-			directoryWriter.Write(cdef.Value.Size);
+			writeStream?.Flush();
+			writeStream?.Close();
+			writeStream?.Dispose();
 		}
-		
-		directoryWriter.Write(offsets.Count);
-		foreach (var o in offsets)
-		{
-			directoryWriter.Write(o);
-		}
-		
-		directoryWriter.Flush();
-		directoryWriter.Close();
+
 	}
 }
 
@@ -249,14 +310,16 @@ public class CDirReadHandle : IDisposable
 	public readonly Stream ReadStream;
 	public readonly ulong Length;
 	public readonly ulong ReadOffset;
-	public readonly ulong Hash;
+	public readonly ContentPath Path;
+	public readonly ulong Checksum;
 	
-	public CDirReadHandle(ulong readOffset, ulong length, Stream readStream, ulong hash)
+	public CDirReadHandle(ulong readOffset, ulong length, Stream readStream, ContentPath path, ulong checksum)
 	{
 		ReadOffset = readOffset;
 		Length = length;
 		ReadStream = readStream;
-		Hash = hash;
+		Path = path;
+		Checksum = checksum;
 	}
 
 
@@ -275,9 +338,24 @@ public class CDirReadHandle : IDisposable
 	}
 }
 
-public struct ContentDirectoryFileDef
+internal struct FileDefinition
 {
+	public string Name;
+	public ulong Checksum;
 	public ulong Offset;
 	public uint Size;
-	public ulong Hash;
+	public FileInfo? FileInfo;
+}
+
+internal struct DirectoryDefinition
+{
+	public string Name;
+	public DirectoryInfo? DirectoryInfo;
+	public Dictionary<string, DirectoryDefinition> Directories = new Dictionary<string, DirectoryDefinition>();
+	public Dictionary<string, FileDefinition> Files = new Dictionary<string, FileDefinition>();
+	
+	public DirectoryDefinition()
+	{
+		Name = "";
+	}
 }

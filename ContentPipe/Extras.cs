@@ -8,9 +8,9 @@ internal static class Extras
 	public static string ReadTerminatedString(this BinaryReader reader)
 	{
 		string s = "";
-		char c;
-		while ((c = reader.ReadChar()) != '\0')
-			s += c;
+		byte c;
+		while ((c = reader.ReadByte()) != '\0')
+			s += (char)c;
 		return s;
 	}
 	
