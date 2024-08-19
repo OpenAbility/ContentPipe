@@ -1,3 +1,4 @@
+using System.Diagnostics.Contracts;
 using System.Text;
 
 namespace ContentPipe;
@@ -10,6 +11,7 @@ public readonly struct ContentPath
 	public readonly string[] Parts;
 	public readonly string? MountPoint;
 	public readonly string? DirectoryIdentifier;
+	public readonly bool Rooted;
 
 	public ContentPath(params string[] parts)
 	{
@@ -25,11 +27,12 @@ public readonly struct ContentPath
 				DirectoryIdentifier = parts[i][1..];
 			else
 				partsList.Add(parts[i]);
+			
 		}
 		Parts = partsList.ToArray();
 	}
 	
-	public ContentPath(string formatted) : this(formatted.Split("/", StringSplitOptions.RemoveEmptyEntries))
+	public ContentPath(string formatted) : this(formatted.Split("/"))
 	{
 		
 	}
@@ -47,6 +50,7 @@ public readonly struct ContentPath
 		MountPoint = mountPoint;
 	}
 
+	[Pure]
 	public override string ToString()
 	{
 		// It's basically just a regular old path.
@@ -56,43 +60,58 @@ public readonly struct ContentPath
 		if (MountPoint != null && !String.IsNullOrEmpty(MountPoint))
 			pathParts.Add("@" + DirectoryIdentifier);
 		pathParts.AddRange(Parts);
-		return string.Join("/", pathParts);
+		return (Rooted ? "/" : "") + String.Join("/", pathParts);
 	}
 
+	[Pure]
 	public ContentPath Append(string part)
 	{
 		return new ContentPath(Parts.Concat(part.Split("/", StringSplitOptions.TrimEntries)).ToArray(), DirectoryIdentifier, MountPoint);
 	}
 
+	[Pure]
 	public ContentPath NoDirectoryIdentifier()
 	{	
 		return new ContentPath(Parts.ToArray(), null, MountPoint);
 	}
 
+	[Pure]
 	public ContentPath MoveUp()
 	{
 		return new ContentPath(Parts[..^1], DirectoryIdentifier, MountPoint);
 	}
 	
+	[Pure]
 	public ContentPath MoveIn()
 	{
 		return new ContentPath(Parts[1..], DirectoryIdentifier, MountPoint);
 	}
 	
+	[Pure]
 	public static implicit operator string(ContentPath path)
 	{
 		return path.ToString();
 	}
 
+	[Pure]
 	public static implicit operator ContentPath(string path)
 	{
 		return new ContentPath(path);
 	}
+	
+	[Pure]
+	public static ContentPath operator +(ContentPath first, ContentPath second)
+	{
+		return first.Join(second);
+	}
+	
+	[Pure]
 	public ContentPath NoMount()
 	{
 		return new ContentPath(Parts, DirectoryIdentifier, null);
 	}
 
+	[Pure]
 	public ContentPath RemoveMount(ContentMount directory)
 	{
 		if (directory.MountPoint == null)
@@ -112,27 +131,32 @@ public readonly struct ContentPath
 		return this;
 	}
 
+	[Pure]
 	public ContentPath AddMount(string mount)
 	{
 		return new ContentPath(Parts, DirectoryIdentifier, mount);
 	}
 	
+	[Pure]
 	public bool IsExtension(string ext)
 	{
 		return Parts.LastOrDefault()?.EndsWith(ext) ?? false;
 	}
 	
+	[Pure]
 	public string GetExtension()
 	{
 		string? last = Parts.LastOrDefault();
 		return last == null ? "" : Path.GetExtension(last);
 	}
 
+	[Pure]
 	private ContentPath Clone()
 	{
 		return new ContentPath(Parts.ToArray(), DirectoryIdentifier, MountPoint);
 	}
 
+	[Pure]
 	public ContentPath SetExtension(string ext)
 	{
 		if (Parts.Length == 0)
@@ -144,5 +168,51 @@ public readonly struct ContentPath
 		path.Parts[^1] = last;
 
 		return path;
+	}
+
+	/// <summary>
+	/// Appends another path onto this path
+	/// </summary>
+	/// <param name="path">The other path</param>
+	/// <returns>The joined paths</returns>
+	[Pure]
+	public ContentPath Join(ContentPath path)
+	{
+		if (path.MountPoint != MountPoint)
+			throw new Exception("Incompatible mount points found!");
+		if (path.DirectoryIdentifier != DirectoryIdentifier)
+			throw new Exception("Incompatible mount points found!");
+		if (path.Rooted)
+			return path;
+		return new ContentPath(Parts.Concat(path.Parts).ToArray(), DirectoryIdentifier, MountPoint);
+	}
+
+	/// <summary>
+	/// Simplifies and resolved the path
+	/// </summary>
+	/// <returns>The attempted and simplified path</returns>
+	[Pure]
+	public ContentPath Resolve()
+	{
+		Stack<string> partsStack = new Stack<string>();
+		for (int i = 0; i < Parts.Length; i++)
+		{
+			// The "." sign basically means "do nothing"
+			if (Parts[i] == ".")
+				continue;
+			// Step up
+			else if (Parts[i] == "..")
+			{
+				if (partsStack.Count < 1)
+					throw new Exception("Cannot step up beyond root directory!");
+				partsStack.Pop();
+			}
+			else
+			{
+				partsStack.Push(Parts[i]);
+			}
+		}
+
+		return new ContentPath(partsStack.ToArray(), DirectoryIdentifier, MountPoint);
 	}
 }

@@ -18,7 +18,10 @@ CDIR file has been revamped.
 - Files - 4 bytes - UInt32 count
 - File - [Files] * ? bytes - A list of files
   - Name - ? bytes - A null-terminated string
-  - Checksum - 8 bytes - UInt64 checksum for the file data
+  - Compression - 1 byte - UInt8 compression identifier. See lower in document.
+  - Checksum - 16 bytes - UInt128 MD5 checksum for the file data. OPTIONAL:
+    - Upper - 8 bytes - UInt64 beginning of MD5 checksum
+    - Lower - 8 bytes - UInt64 end of MD5 checksum
   - Offset - 8 bytes - UInt64 offset into the file data
   - Length - 4 bytes - UInt32 file data length
 
@@ -39,3 +42,6 @@ So if we have `Content.cdir`, it will be split up into e.g the following files:
 - `Content.cdir_2` - Segment 2
 - `Content.cdir_3` - Segment 3
   And so on
+
+## Compression Identifiers
+0 - No compression/RAW

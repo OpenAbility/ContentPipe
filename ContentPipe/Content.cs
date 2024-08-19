@@ -52,6 +52,16 @@ public static class Content
 	{
 		return Mounts.Remove(mount);
 	}
+
+	/// <summary>
+	/// Searches for a ContentMount
+	/// </summary>
+	/// <param name="id">The mount ID</param>
+	/// <returns>The mount, or null if not found</returns>
+	public static ContentMount? GetMount(string id)
+	{
+		return Mounts.Find(m => m.ID == id);
+	}
 	
 	public static void UnmountAll()
 	{

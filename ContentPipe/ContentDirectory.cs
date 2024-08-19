@@ -1,3 +1,4 @@
+using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text;
 
@@ -51,6 +52,8 @@ public class ContentDirectory
 		// path to root.
 		if (RootDirectory.Name != "" && RootDirectory.Name != path.Parts[0])
 			return null;
+
+		path = path.Resolve();
 		
 		FileDefinition? file = null;
 		if (RootDirectory.Name != "")
@@ -83,7 +86,7 @@ public class ContentDirectory
 
 		ulong readOffset = file.Value.Offset - segmentOffsets[seg] + 4;
 
-		return new CDirReadHandle(readOffset, file.Value.Size, stream, path, file.Value.Checksum);
+		return new CDirReadHandle(readOffset, file.Value.Size, stream, path, unchecked((ulong)file.Value.Checksum));
 	}
 
 	public ContentDirectory(Stream stream, string path)
@@ -125,7 +128,11 @@ public class ContentDirectory
 		{
 			FileDefinition fileDefinition = new FileDefinition();
 			fileDefinition.Name = reader.ReadTerminatedString();
-			fileDefinition.Checksum = reader.ReadUInt64();
+			fileDefinition.Compression = (CompressionAlgorithm)reader.ReadByte();
+			// TODO: Is this the wrong byte order?
+			ulong upper = reader.ReadUInt64();
+			ulong lower = reader.ReadUInt64();
+			fileDefinition.Checksum = new UInt128(upper, lower);
 			fileDefinition.Offset = reader.ReadUInt64();
 			fileDefinition.Size = reader.ReadUInt32();
 			directoryDefinition.Files[fileDefinition.Name] = fileDefinition;
@@ -134,7 +141,7 @@ public class ContentDirectory
 		return directoryDefinition;
 	}
 
-	private static DirectoryDefinition BuildDirectory(DirectoryInfo info, Stack<PackIgnore> ignoreStack)
+	private static DirectoryDefinition BuildDirectory(DirectoryInfo info, Stack<PackIgnore> ignoreStack, CompressionAlgorithm compressionAlgorithm)
 	{
 		// Much, much nicer directory searching that uses DirectoryInfo.
 		// Makes everything much cleaner and less hacky.
@@ -150,7 +157,7 @@ public class ContentDirectory
 
 		foreach (var subInfo in info.GetDirectories())
 		{
-			DirectoryDefinition directory = BuildDirectory(subInfo, ignoreStack);
+			DirectoryDefinition directory = BuildDirectory(subInfo, ignoreStack, compressionAlgorithm);
 			directoryDefinition.Directories[directory.Name] = directory;
 		}
 		
@@ -164,7 +171,8 @@ public class ContentDirectory
 			FileDefinition definition = new FileDefinition
 			{
 				Name = file.Name,
-				FileInfo = file
+				FileInfo = file,
+				Compression = compressionAlgorithm
 			};
 			directoryDefinition.Files[definition.Name] = definition;
 		}
@@ -191,23 +199,23 @@ public class ContentDirectory
 			
 			writeContext.Writer.Write(file.Name.ToCharArray());
 			writeContext.Writer.Write((byte)0);
+			writeContext.Writer.Write((byte)file.Compression);
+			writeContext.Writer.Write(writeContext.HashFunction.ComputeHash(fs));
 			
-			writeContext.Writer.Write(0ul);
+			fs.Position = 0;
 			writeContext.Writer.Write(writeContext.WriteFile(fs, (ulong)fs.Length));
 			writeContext.Writer.Write((uint)fs.Length);
 		}
 	}
 
-	public static void Pack(string input, string output, bool listing = true, bool globalRoot = true)
+	public static void Pack(string input, string output, bool listing = true, bool globalRoot = true, CompressionAlgorithm compression = CompressionAlgorithm.None)
 	{
-		using MD5 md5 = MD5.Create();
-		
 		if (input == "")
 			input = ".";
 
 		
 		DirectoryInfo readDirectory = new DirectoryInfo(input);
-		DirectoryDefinition definition = BuildDirectory(readDirectory, new Stack<PackIgnore>());
+		DirectoryDefinition definition = BuildDirectory(readDirectory, new Stack<PackIgnore>(), compression);
 		// If the root dir has an empty name that means it is "global", and mustn't
 		// be directly addressed. If it is non-empty, it will always take it into account
 		// when searching.
@@ -250,6 +258,8 @@ public class ContentDirectory
 		private FileStream? writeStream;
 		private string baseFileName;
 
+		public MD5 HashFunction = MD5.Create();
+		
 		public List<ulong> SegmentOffset = new List<ulong>();
 
 
@@ -341,8 +351,9 @@ public class CDirReadHandle : IDisposable
 internal struct FileDefinition
 {
 	public string Name;
-	public ulong Checksum;
+	public UInt128 Checksum;
 	public ulong Offset;
+	public CompressionAlgorithm Compression;
 	public uint Size;
 	public FileInfo? FileInfo;
 }
@@ -358,4 +369,9 @@ internal struct DirectoryDefinition
 	{
 		Name = "";
 	}
+}
+
+public enum CompressionAlgorithm : byte
+{
+	None
 }
