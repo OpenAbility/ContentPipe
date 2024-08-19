@@ -7,6 +7,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ContentPipe", "ContentPipe\
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ContentPipe.Test", "ContentPipe.Test\ContentPipe.Test.csproj", "{1673B55C-6232-4002-BE02-E8A19680E348}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ContentPipe.Dev", "ContentPipe.Dev\ContentPipe.Dev.csproj", "{C81904F4-5603-4B8A-A33E-1DC71D37C205}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -24,5 +26,9 @@ Global
 		{1673B55C-6232-4002-BE02-E8A19680E348}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{1673B55C-6232-4002-BE02-E8A19680E348}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{1673B55C-6232-4002-BE02-E8A19680E348}.Release|Any CPU.Build.0 = Release|Any CPU
+		{C81904F4-5603-4B8A-A33E-1DC71D37C205}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{C81904F4-5603-4B8A-A33E-1DC71D37C205}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{C81904F4-5603-4B8A-A33E-1DC71D37C205}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{C81904F4-5603-4B8A-A33E-1DC71D37C205}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal

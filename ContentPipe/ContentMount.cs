@@ -1,146 +1,43 @@
+using ContentPipe.ContentCompilation;
+
 namespace ContentPipe;
 
-/// <summary>
-/// A content mounting point
-/// </summary>
 public class ContentMount
 {
+	public readonly ContentMountType MountType;
 	public readonly string ID;
 	public readonly string? MountPoint;
-	public readonly string PhysicalPath;
-	public readonly ContentMountType Type;
-
+	public readonly string LoadPath;
+	public readonly string? SourcePath;
+	public readonly ContentCompileContext? CompileContext;
 	private readonly ContentDirectory? contentDirectory;
-	
-	internal ContentMount(string id, string? mountPoint, string physicalPath, ContentDirectory? directory, ContentMountType type)
+
+	internal ContentMount(ContentMountType mountType, string id, string? mountPoint, string loadPath, string? sourcePath, ContentCompileContext? compileContext, ContentDirectory? contentDirectory)
 	{
+		MountType = mountType;
 		ID = id;
 		MountPoint = mountPoint;
-		PhysicalPath = physicalPath;
-		contentDirectory = directory;
-		Type = type;
+		LoadPath = loadPath;
+		SourcePath = sourcePath;
+		CompileContext = compileContext;
+		this.contentDirectory = contentDirectory;
 	}
 
-	public static ContentMount Create(ContentMountData data)
+
+	public IEnumerable<ContentPath> GetFiles(bool packable = true)
 	{
-		ContentDirectory? directory = null;
-		if (data.MountType == ContentMountType.PackedDirectory)
-		{
-			directory = new ContentDirectory(data.Path + ".cdir");
-		}
-
-		return new ContentMount(data.ID ?? data.Path, data.MountPoint, data.Path, directory, data.MountType);
-	}
-
-	public void RequestCompile(ContentPath path)
-	{
-		if (Type != ContentMountType.PhysicalDirectory)
-			return;
-
-		ContentPath loadablePath = path.NoDirectoryIdentifier().RemoveMount(this);
-		string loadPath = Path.Combine(PhysicalPath, loadablePath);
-
-		if (Content.ContentCompiler == null)
-			return;
+		if (MountType == ContentMountType.PackedDirectory)
+			return contentDirectory!.GetContent(MountPoint);
 		
-		if (!Content.ContentCompiler.ShouldRecompile(path, this, !File.Exists(loadPath)))
-			return;
+		ContentPath root = new ContentPath();
+		if (MountPoint != null)
+			root = root.AddMount(MountPoint);
+		Stack<PackIgnore>? ignores = packable ? new Stack<PackIgnore>() : null;
 
-		if (!Directory.Exists(Path.GetDirectoryName(loadPath) ?? ""))
-			Directory.CreateDirectory(Path.GetDirectoryName(loadPath) ?? "");
-
-		FileStream fileStream = File.OpenWrite(loadPath);
-		Content.ContentCompiler.RecompileContent(path, fileStream, this, File.Exists(loadPath));
-		fileStream.Close();
-
+		if(SourcePath == null || CompileContext == null)
+			return EnumerateDirectory(new DirectoryInfo(LoadPath), root, ignores);
+		return EnumerateDirectory(new DirectoryInfo(SourcePath), root, ignores);
 	}
-
-	public ContentLump? Load(ContentPath path)
-	{
-		if (MountPoint != null && !(MountPoint == path.Parts.FirstOrDefault() || MountPoint != path.MountPoint))
-			return null;
-
-		ContentPath loadablePath = path.NoDirectoryIdentifier().RemoveMount(this);
-		
-		// CDIR loading
-		if (Type == ContentMountType.PackedDirectory)
-		{
-			CDirReadHandle? handle = contentDirectory!.ReadFile(loadablePath);
-			if (handle == null)
-				return null;
-
-			// TODO: Wrap stuff instead!
-			return new ContentLump
-			{
-				Data = handle.Read(),
-				Name = path,
-				UniqueID = handle.Checksum
-			};
-		} else if (Type == ContentMountType.PhysicalDirectory)
-		{
-			string loadPath = Path.Combine(PhysicalPath, loadablePath);
-			if (Content.ContentCompiler != null)
-			{
-				bool shouldCompile = true;
-				shouldCompile = Content.ContentCompiler.ShouldRecompile(path, this, !File.Exists(loadPath));
-				if (shouldCompile)
-				{
-					if (!Directory.Exists(Path.GetDirectoryName(loadPath) ?? ""))
-						Directory.CreateDirectory(Path.GetDirectoryName(loadPath) ?? "");
-					try
-					{
-						FileStream fileStream = File.OpenWrite(loadPath);
-						Content.ContentCompiler.RecompileContent(path, fileStream, this, File.Exists(loadPath));
-						fileStream.Close();
-					}
-					catch (Exception _)
-					{
-						// ignored
-					}
-
-				}
-			}
-		
-			if (File.Exists(loadPath))
-			{
-				DateTime lastWrite = File.GetLastWriteTimeUtc(loadPath);
-				try
-				{
-					return new ContentLump
-					{
-						Stream = File.OpenRead(loadPath), Name = path, UniqueID = (ulong)(lastWrite - DateTime.UnixEpoch).TotalSeconds
-					};
-				}
-				catch (Exception _)
-				{
-					return null;
-				}
-
-			}
-		}
-
-		return null;
-	}
-	
-	public IEnumerable<ContentPath> GetContent(bool packable = false)
-	{
-		if (Type == ContentMountType.PackedDirectory)
-		{
-			//return contentDirectory!.GetContent().Select(c => new ContentPath(c)).ToArray();
-		} else if (Type == ContentMountType.PhysicalDirectory)
-		{
-			ContentPath root = new ContentPath();
-			if (MountPoint != null)
-				root = root.AddMount(MountPoint);
-			Stack<PackIgnore>? ignores = packable ? new Stack<PackIgnore>() : null;
-			
-			foreach (ContentPath contentPath in EnumerateDirectory(new DirectoryInfo(PhysicalPath), root, ignores))
-			{
-				yield return contentPath;
-			}
-		}
-	}
-	
 	
 	private IEnumerable<ContentPath> EnumerateDirectory(DirectoryInfo directory, ContentPath parentPath, Stack<PackIgnore>? ignoreStack)
 	{
@@ -163,7 +60,12 @@ public class ContentMount
 					continue;
 			}
 
-			yield return parentPath.Append(file.Name);
+			
+			ContentPath filePath = parentPath.Append(file.Name);
+			if(CompileContext != null && SourcePath != null)
+				filePath = filePath.SetExtension(CompileContext.GetTargetExtension(filePath));
+			
+			yield return filePath;
 		}
 
 		foreach (var subdir in directory.GetDirectories())
@@ -178,64 +80,137 @@ public class ContentMount
 			}
 		}
 	}
-}
 
-public struct ContentMountData
-{
-	public ContentMountType MountType;
-	public string Path;
-	public string? ID; // Defaults to Path
-	public string? MountPoint; // AKA prefix.
+	/// <summary>
+	/// Compiles a resource
+	/// </summary>
+	/// <param name="path">The resource path to compile</param>
+	/// <returns>True if the compiled resource now exists</returns>
+	public bool Compile(ContentPath path)
+	{
+		// We cannot compile it
+		if (CompileContext == null || SourcePath == null)
+			return false;
+		
+		ContentPath loadablePath = path.NoDirectoryIdentifier().RemoveMount(this);
+		
+		// Get the source extension
+		string sourceExtension = CompileContext.GetSourceExtension(path);
+		string targetPath = Path.Join(LoadPath, loadablePath);
+		string sourcePath = Path.Join(SourcePath, loadablePath.SetExtension(sourceExtension));
+		
+		return CompileContext.PerformCompile(sourcePath, targetPath, path.GetExtension());
+	}
 
-	public readonly ContentMountData SetID(string id)
+	public ContentLump? Load(ContentPath path)
 	{
-		ContentMountData mountData = this;
-		mountData.ID = id;
-		return mountData;
-	}
-	
-	public static ContentMountData Physical(string path)
-	{
-		return new ContentMountData()
+		if (MountPoint != null && !(MountPoint == path.Parts.FirstOrDefault() || MountPoint != path.MountPoint))
+			return null;
+		
+		ContentPath loadablePath = path.NoDirectoryIdentifier().RemoveMount(this);
+		
+		// CDIR loading
+		if (MountType == ContentMountType.PackedDirectory)
 		{
-			MountType = ContentMountType.PhysicalDirectory, Path = path
-		};
-	}
-	
-	public static ContentMountData PhysicalPoint(string path, string point)
-	{
-		return new ContentMountData()
+			CDirReadHandle? handle = contentDirectory!.ReadFile(loadablePath);
+			if (handle == null)
+				return null;
+
+			// TODO: Wrap stuff instead!
+			return new ContentLump
+			{
+				Data = handle.Read(),
+				Name = path,
+				UniqueID = handle.Checksum
+			};
+		} else if (MountType == ContentMountType.PhysicalDirectory)
 		{
-			MountType = ContentMountType.PhysicalDirectory, Path = path, MountPoint = point
-		};
-	}
-	
-	
-	public static ContentMountData Packed(string path)
-	{
-		return new ContentMountData()
-		{
-			MountType = ContentMountType.PackedDirectory, Path = path
-		};
-	}
-	
-	public static ContentMountData PackedPoint(string path, string point)
-	{
-		return new ContentMountData()
-		{
-			MountType = ContentMountType.PackedDirectory, Path = path, MountPoint = point
-		};
+			string loadPath = Path.Combine(LoadPath, loadablePath);
+			bool mayCompile = CompileContext != null && SourcePath != null;
+			bool mayLoad = mayCompile ? Compile(loadablePath) : File.Exists(loadPath);
+			
+			if (mayLoad)
+			{
+				DateTime lastWrite = File.GetLastWriteTimeUtc(loadPath);
+				try
+				{
+					return new ContentLump
+					{
+						Stream = File.OpenRead(loadPath), Name = path, UniqueID = (ulong)(lastWrite - DateTime.UnixEpoch).TotalSeconds
+					};
+				}
+				catch (Exception _)
+				{
+					return null;
+				}
+
+			}
+		}
+
+		return null;
 	}
 }
 
 public enum ContentMountType
 {
-	/// <summary>
-	/// A packed content directory
-	/// </summary>
-	PackedDirectory,
-	/// <summary>
-	/// A physical file-system directory
-	/// </summary>
-	PhysicalDirectory
+	PhysicalDirectory,
+	PackedDirectory
+}
+
+/// <summary>
+/// Builds a content mount
+/// </summary>
+public class MountBuilder
+{
+	private ContentMountType type;
+	private string loadPath;
+	private string? sourceDirectory;
+	private string id;
+	private string? mountPoint;
+	private ContentCompileContext? compileContext;
+
+	protected MountBuilder(ContentMountType mountType, string path)
+	{
+		type = mountType;
+		loadPath = path;
+		id = path;
+	}
+
+	public static MountBuilder BeginPacked(string path)
+	{
+		return new MountBuilder(ContentMountType.PackedDirectory, path);
+	}
+	
+	public static MountBuilder Begin(string path)
+	{
+		return new MountBuilder(ContentMountType.PhysicalDirectory, path);
+	}
+	
+	public MountBuilder Compilable(ContentCompileContext context, string path)
+	{
+		if (type == ContentMountType.PackedDirectory)
+			return this;
+		sourceDirectory = path;
+		compileContext = context;
+		return this;
+	}
+
+	public MountBuilder ID(string id)
+	{
+		this.id = id;
+		return this;
+	}
+	
+	public MountBuilder MountPoint(string point)
+	{
+		mountPoint = point;
+		return this;
+	}
+
+	public ContentMount Finish()
+	{
+		return new ContentMount(
+			type, id, mountPoint, loadPath, sourceDirectory, compileContext,
+			type == ContentMountType.PackedDirectory ? new ContentDirectory(loadPath + ".cdir") : null);
+	}
 }

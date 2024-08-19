@@ -1,4 +1,4 @@
-using System.IO.Compression;
+﻿using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text;
 
@@ -109,6 +109,32 @@ public class ContentDirectory
 		{
 			segmentOffsets[i] = reader.ReadUInt64();
 		}
+	}
+
+	public IEnumerable<ContentPath> GetContent(string? mountPoint)
+	{
+		ContentPath currentPath = new ContentPath();
+		if(mountPoint != null)
+			currentPath = currentPath.AddMount(mountPoint);
+
+		return IterateDirectory(currentPath, RootDirectory);
+	}
+
+	private IEnumerable<ContentPath> IterateDirectory(ContentPath path, DirectoryDefinition directory)
+	{
+		if (directory.Name != "")
+			path = path.Append(directory.Name);
+
+		foreach (var file in directory.Files)
+		{
+			yield return path.Append(file.Key);
+		}
+
+		foreach (ContentPath p in directory.Directories.SelectMany(subDirectory => IterateDirectory(path, subDirectory.Value)))
+		{
+			yield return p;
+		}
+		
 	}
 
 	private static DirectoryDefinition LoadDirectory(BinaryReader reader)

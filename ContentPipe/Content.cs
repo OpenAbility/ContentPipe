@@ -18,11 +18,6 @@ public static class Content
 	public static bool ShouldLogLoads = false;
 
 	public static string IdentifierPrefix = "";
-
-	/// <summary>
-	/// The currently active content compiler
-	/// </summary>
-	public static IContentCompiler? ContentCompiler;
 	
 	/// <summary>
 	/// A filter to run on all log load registrations, in case you want to ignore something.
@@ -149,7 +144,7 @@ public static class Content
 			if (mount != null)
 			{
 				ContentPath noDir = resource.NoDirectoryIdentifier();
-				mount.RequestCompile(noDir);
+				mount.Compile(noDir);
 				return;
 			}
 		}
@@ -157,7 +152,7 @@ public static class Content
 		resource = resource.NoDirectoryIdentifier();
 		foreach (var mount in Mounts)
 		{
-			mount.RequestCompile(resource);
+			mount.Compile(resource);
 		}
 	}
 
@@ -309,7 +304,7 @@ public static class Content
 		{
 			foreach (var mount in Mounts)
 			{
-				foreach (var res in mount.GetContent())
+				foreach (var res in mount.GetFiles())
 				{
 					if(!String.IsNullOrWhiteSpace(res))
 						LoadedContent.TryAdd(res, 0);
@@ -334,7 +329,7 @@ public static class Content
 	{
 		foreach (var mount in Mounts)
 		{
-			foreach (var v in mount.GetContent(packable))
+			foreach (var v in mount.GetFiles(packable))
 			{
 				yield return v;
 			}

@@ -130,6 +130,7 @@ public readonly struct ContentPath
 		
 		return this;
 	}
+	
 
 	[Pure]
 	public ContentPath AddMount(string mount)
