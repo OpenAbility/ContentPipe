@@ -214,6 +214,6 @@ public readonly struct ContentPath
 			}
 		}
 
-		return new ContentPath(partsStack.ToArray(), DirectoryIdentifier, MountPoint);
+		return new ContentPath(partsStack.Reverse().ToArray(), DirectoryIdentifier, MountPoint);
 	}
 }

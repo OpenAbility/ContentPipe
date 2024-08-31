@@ -57,6 +57,15 @@ public static class Content
 	{
 		return Mounts.Find(m => m.ID == id);
 	}
+
+	/// <summary>
+	/// Gets all current content mounts
+	/// </summary>
+	/// <returns>The mounts</returns>
+	public static IEnumerable<ContentMount> GetMounts()
+	{
+		return Mounts;
+	}
 	
 	public static void UnmountAll()
 	{
@@ -138,18 +147,16 @@ public static class Content
 
 	public static void RequestCompiles(ContentPath resource)
 	{
+		ContentPath noDir = resource.NoDirectoryIdentifier();
+
 		if (resource.DirectoryIdentifier != null)
 		{
 			ContentMount? mount = Mounts.Find(m => m.ID == resource.DirectoryIdentifier);
-			if (mount != null)
-			{
-				ContentPath noDir = resource.NoDirectoryIdentifier();
+			if(mount != null)
 				mount.Compile(noDir);
-				return;
-			}
+			return;
 		}
 		
-		resource = resource.NoDirectoryIdentifier();
 		foreach (var mount in Mounts)
 		{
 			mount.Compile(resource);
@@ -179,12 +186,9 @@ public static class Content
 			if(lump.Value.Stream == null)
 				return Array.Empty<byte>();
 
-			byte[] readBuffer = new byte[lump.Value.Stream.Length];
-			if (lump.Value.Stream.Read(readBuffer) != readBuffer.Length)
-			{
-				
-			}
-			return readBuffer;
+			MemoryStream memoryStream = new MemoryStream();
+			lump.Value.Stream.CopyTo(memoryStream);
+			return memoryStream.ToArray();
 		}
 		return lump.Value.Data;
 	}

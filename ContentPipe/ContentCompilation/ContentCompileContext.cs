@@ -53,6 +53,11 @@ public class ContentCompileContext
 			if (File.GetLastWriteTimeUtc(sourceFile) <= File.GetLastWriteTimeUtc(targetFile))
 				return true;
 		}
+
+		string? targetDirectory = Path.GetDirectoryName(targetFile);
+		if(targetDirectory != null)
+			if (!Directory.Exists(targetDirectory))
+				Directory.CreateDirectory(targetDirectory);
 		
 		
 		ICompileHandler? handler = compilers!.GetValueOrDefault(targetExtension, DefaultHandler);
