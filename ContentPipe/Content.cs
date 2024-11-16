@@ -340,11 +340,16 @@ public static class Content
 		}
 	}
 
-	public static ulong GetContentID(string path)
+	public static ulong GetContentID(ContentPath path)
 	{
 		ContentLump? lump = Load(path);
 		if (lump == null)
 			return 0;
 		return lump.Value.UniqueID ?? 0;
+	}
+
+	public static bool Exists(ContentPath path)
+	{
+		return Load(path) != null;
 	}
 }

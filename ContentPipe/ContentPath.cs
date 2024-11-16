@@ -1,3 +1,5 @@
+using Microsoft.VisualBasic.CompilerServices;
+using System.Diagnostics.CodeAnalysis;
 using System.Diagnostics.Contracts;
 using System.Text;
 
@@ -13,15 +15,29 @@ public readonly struct ContentPath
 	public readonly string? DirectoryIdentifier;
 	public readonly bool Rooted;
 
-	public ContentPath(params string[] parts)
+	public ContentPath(params string[] parts) : this(parts, false)
+	{
+	}
+	
+	public ContentPath(string formatted) : this(formatted.Split("/"), formatted.StartsWith("/"))
+	{
+		
+	}
+	
+	private ContentPath(string[] parts, bool knownRooted)
 	{
 		List<string> partsList = new List<string>();
+		Rooted = knownRooted;
 		for (int i = 0; i < parts.Length; i++)
 		{
 			// The first component may be a "Directory Identifier", prefixed with an ampersand.
 			// This can be used by the loader to find the appropriate content directory quickly.
 			if (i == 0 && parts[i].StartsWith("$"))
 				DirectoryIdentifier = parts[i][1..];
+			else if (i == 0 && parts[i] == "")
+			{
+				Rooted = true;
+			}
 			// It can also be a mount point, specified with the "@" symbol.
 			else if (i <= 1 && parts[i].StartsWith("@"))
 				DirectoryIdentifier = parts[i][1..];
@@ -30,11 +46,6 @@ public readonly struct ContentPath
 			
 		}
 		Parts = partsList.ToArray();
-	}
-	
-	public ContentPath(string formatted) : this(formatted.Split("/"))
-	{
-		
 	}
 
 	public ContentPath()
@@ -215,5 +226,43 @@ public readonly struct ContentPath
 		}
 
 		return new ContentPath(partsStack.Reverse().ToArray(), DirectoryIdentifier, MountPoint);
+	}
+
+	public override bool Equals([NotNullWhen(true)] object? obj)
+	{
+		ContentPath other;
+		if (obj is string s)
+			other = s;
+		else if (obj is ContentPath path)
+			other = path;
+		else
+			return false;
+
+		other = other.Resolve();
+		ContentPath local = Resolve();
+
+		if (other.MountPoint != local.MountPoint)
+			return false;
+		if (other.DirectoryIdentifier != local.DirectoryIdentifier)
+			return false;
+		if (other.Parts.Length != local.Parts.Length)
+			return false;
+
+		return !local.Parts.Where((t, i) => other.Parts[i] != t).Any();
+	}
+
+	public override int GetHashCode()
+	{
+		return ToString().GetHashCode();
+	}
+
+	public static bool operator ==(ContentPath a, ContentPath b)
+	{
+		return a.Equals(b);
+	}
+	
+	public static bool operator !=(ContentPath a, ContentPath b)
+	{
+		return !(a == b);
 	}
 }
